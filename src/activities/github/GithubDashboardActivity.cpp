@@ -7,7 +7,9 @@
 #include <WiFi.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -19,6 +21,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "components/icons/github.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 
@@ -211,6 +214,8 @@ void GithubDashboardActivity::runFetch() {
   cells.reserve(MAX_CELLS);
   totalContributions.clear();
   parseBuf.clear();
+  memset(counts, 0, sizeof(counts));
+  countsFound = false;
 
   char url[128];
   snprintf(url, sizeof(url), "https://github.com/users/%s/contributions", SETTINGS.githubUsername);
@@ -228,7 +233,9 @@ void GithubDashboardActivity::runFetch() {
   } else {
     std::sort(cells.begin(), cells.end(),
               [](const ContribCell& a, const ContribCell& b) { return strcmp(a.date, b.date) < 0; });
-    LOG_INF("GH", "Parsed %u days, total \"%s\"", (unsigned)cells.size(), totalContributions.c_str());
+    computeStats();
+    LOG_INF("GH", "Parsed %u days, total %u, streak %d/%d, max %u", (unsigned)cells.size(), (unsigned)statTotal,
+            statCurrentStreak, statLongestStreak, (unsigned)statMostInDay);
     state = State::Showing;
   }
 
@@ -245,29 +252,59 @@ bool GithubDashboardActivity::feedHtml(const uint8_t* data, size_t len) {
   parseBuf.append(reinterpret_cast<const char*>(data), len);
 
   size_t consumed = 0;
-  while (cells.size() < MAX_CELLS) {
+  while (true) {
     const size_t td = parseBuf.find("<td", consumed);
-    if (td == std::string::npos) {
+    const size_t tt = parseBuf.find("<tool-tip", consumed);
+    const size_t next = std::min(td, tt);
+    if (next == std::string::npos) {
       consumed = parseBuf.size() > PARSE_TAIL_KEEP ? parseBuf.size() - PARSE_TAIL_KEEP : 0;
       break;
     }
-    const size_t end = parseBuf.find('>', td);
+    const size_t end = parseBuf.find('>', next);
     if (end == std::string::npos) {
-      consumed = td;  // incomplete tag, wait for the next chunk
+      consumed = next;  // incomplete tag, wait for the next chunk
       break;
     }
 
-    size_t dStart = 0, dLen = 0, lStart = 0, lLen = 0;
-    if (findAttr(parseBuf, td, end, "data-date=", dStart, dLen) && dLen == 10 &&
-        findAttr(parseBuf, td, end, "data-level=", lStart, lLen) && lLen >= 1) {
-      ContribCell cell;
-      memcpy(cell.date, parseBuf.data() + dStart, 10);
-      cell.date[10] = '\0';
-      const char lvl = parseBuf[lStart];
-      cell.level = (lvl >= '0' && lvl <= '4') ? lvl - '0' : 0;
-      cells.push_back(cell);
+    if (next == td) {
+      // Day cell: date + level
+      size_t dStart = 0, dLen = 0, lStart = 0, lLen = 0;
+      if (cells.size() < MAX_CELLS && findAttr(parseBuf, td, end, "data-date=", dStart, dLen) && dLen == 10 &&
+          findAttr(parseBuf, td, end, "data-level=", lStart, lLen) && lLen >= 1) {
+        ContribCell cell;
+        memcpy(cell.date, parseBuf.data() + dStart, 10);
+        cell.date[10] = '\0';
+        const char lvl = parseBuf[lStart];
+        cell.level = (lvl >= '0' && lvl <= '4') ? lvl - '0' : 0;
+        cells.push_back(cell);
+      }
+      consumed = end + 1;
+    } else {
+      // Tool-tip: per-day count text ("5 contributions on ..." / "No contributions on ..."),
+      // linked to a cell via for="contribution-day-component-<row>-<col>".
+      const size_t textEnd = parseBuf.find('<', end + 1);
+      if (textEnd == std::string::npos) {
+        consumed = next;  // count text not fully buffered yet
+        break;
+      }
+      const size_t f = parseBuf.find("contribution-day-component-", next);
+      if (f != std::string::npos && f < end) {
+        int row = -1, col = -1;
+        if (sscanf(parseBuf.c_str() + f, "contribution-day-component-%d-%d", &row, &col) == 2 && row >= 0 &&
+            row < 7 && col >= 0) {
+          const size_t slot = static_cast<size_t>(col) * 7 + row;
+          size_t t = end + 1;
+          while (t < textEnd && isspace(static_cast<unsigned char>(parseBuf[t]))) t++;
+          if (slot < MAX_SLOTS && t < textEnd && isdigit(static_cast<unsigned char>(parseBuf[t]))) {
+            const long n = atol(parseBuf.c_str() + t);
+            counts[slot] = n < 0 ? 0 : (n > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(n));
+            countsFound = true;
+          }
+          // "No contributions ..." leaves the slot at 0
+        }
+      }
+      consumed = textEnd;
     }
-    consumed = end + 1;
   }
 
   if (totalContributions.empty()) {
@@ -277,6 +314,53 @@ bool GithubDashboardActivity::feedHtml(const uint8_t* data, size_t len) {
     parseBuf.erase(0, consumed);
   }
   return true;
+}
+
+bool GithubDashboardActivity::cellContributed(size_t i, int offset) const {
+  if (!countsFound) return cells[i].level > 0;
+  const size_t slot = offset + i;
+  return slot < MAX_SLOTS && counts[slot] > 0;
+}
+
+void GithubDashboardActivity::computeStats() {
+  statTotal = 0;
+  statMostInDay = 0;
+  statLongestStreak = 0;
+  statCurrentStreak = 0;
+  if (cells.empty()) return;
+
+  const int offset = dayOfWeekSunday0(cells.front().date);
+
+  int streak = 0;
+  for (size_t i = 0; i < cells.size(); i++) {
+    if (countsFound) {
+      const size_t slot = offset + i;
+      const uint16_t c = slot < MAX_SLOTS ? counts[slot] : 0;
+      statTotal += c;
+      if (c > statMostInDay) statMostInDay = c;
+    }
+    if (cellContributed(i, offset)) {
+      streak++;
+      if (streak > statLongestStreak) statLongestStreak = streak;
+    } else {
+      streak = 0;
+    }
+  }
+
+  // Current streak: today without contributions (yet) doesn't break it.
+  int j = static_cast<int>(cells.size()) - 1;
+  if (j >= 0 && !cellContributed(j, offset)) j--;
+  while (j >= 0 && cellContributed(j, offset)) {
+    statCurrentStreak++;
+    j--;
+  }
+
+  if (!countsFound) {
+    // Fall back to the heading total ("3,640") when tool-tips were missing.
+    for (const char c : totalContributions) {
+      if (isdigit(static_cast<unsigned char>(c))) statTotal = statTotal * 10 + (c - '0');
+    }
+  }
 }
 
 void GithubDashboardActivity::scanForTotal() {
@@ -353,33 +437,133 @@ void GithubDashboardActivity::renderMessage(const char* message) const {
   renderer.displayBuffer();
 }
 
+// 5x7 dot-matrix glyphs for the big stat numbers (digits, '.', 'k').
+// Each glyph is 7 rows of 5 bits, MSB = leftmost column.
+namespace {
+struct BigGlyph {
+  char ch;
+  uint8_t rows[7];
+  uint8_t width;  // in dot columns
+};
+constexpr BigGlyph BIG_GLYPHS[] = {
+    {'0', {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110}, 5},
+    {'1', {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}, 5},
+    {'2', {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111}, 5},
+    {'3', {0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110}, 5},
+    {'4', {0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010}, 5},
+    {'5', {0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110}, 5},
+    {'6', {0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110}, 5},
+    {'7', {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000}, 5},
+    {'8', {0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110}, 5},
+    {'9', {0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100}, 5},
+    {'.', {0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00110, 0b00110}, 3},
+    {'k', {0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010}, 5},
+};
+
+const BigGlyph* findBigGlyph(char c) {
+  for (const auto& g : BIG_GLYPHS) {
+    if (g.ch == c) return &g;
+  }
+  return nullptr;
+}
+
+void formatCompact(uint32_t n, char* out, size_t outLen) {
+  if (n >= 10000) {
+    snprintf(out, outLen, "%uk", (unsigned)(n / 1000));
+  } else if (n >= 1000) {
+    snprintf(out, outLen, "%u.%uk", (unsigned)(n / 1000), (unsigned)((n % 1000) / 100));
+  } else {
+    snprintf(out, outLen, "%u", (unsigned)n);
+  }
+}
+}  // namespace
+
+int GithubDashboardActivity::bigTextWidth(const char* text, int dot) {
+  int w = 0;
+  for (const char* p = text; *p; p++) {
+    const BigGlyph* g = findBigGlyph(*p);
+    w += ((g ? g->width : 5) + 1) * dot;
+  }
+  return w > 0 ? w - dot : 0;  // drop trailing inter-glyph space
+}
+
+void GithubDashboardActivity::drawBigText(int x, int y, const char* text, int dot) const {
+  for (const char* p = text; *p; p++) {
+    const BigGlyph* g = findBigGlyph(*p);
+    if (!g) {
+      x += 6 * dot;
+      continue;
+    }
+    for (int r = 0; r < 7; r++) {
+      for (int c = 0; c < 5; c++) {
+        if (g->rows[r] & (1 << (4 - c))) {
+          renderer.fillRect(x + c * dot, y + r * dot, dot, dot);
+        }
+      }
+    }
+    x += (g->width + 1) * dot;
+  }
+}
+
 void GithubDashboardActivity::renderDashboard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
+  constexpr int sideMargin = 30;
 
   renderer.clearScreen();
 
-  // Header
-  char title[64];
-  snprintf(title, sizeof(title), "@%s", SETTINGS.githubUsername);
-  renderer.drawCenteredText(UI_12_FONT_ID, 290, title, true, EpdFontFamily::BOLD);
+  // --- Hero: big compact total + caption (TRMNL style) ---
+  char hero[16];
+  formatCompact(statTotal, hero, sizeof(hero));
+  renderer.fillRectDither(sideMargin - 14, 55, 8, 70, Color::LightGray);  // accent bar
+  drawBigText(sideMargin, 55, hero, 10);
+  renderer.drawText(UI_10_FONT_ID, sideMargin, 140, tr(STR_GITHUB_CONTRIB_CAPTION));
 
-  if (!totalContributions.empty()) {
-    char line[96];
-    snprintf(line, sizeof(line), "%s %s", totalContributions.c_str(), tr(STR_GITHUB_CONTRIB_SUFFIX));
-    renderer.drawCenteredText(UI_10_FONT_ID, 330, line);
+  renderer.fillRect(sideMargin, 185, pageWidth - 2 * sideMargin, 1);
+
+  // --- 2x2 stat grid ---
+  struct StatEntry {
+    char value[16];
+    const char* label;
+  };
+  StatEntry stats[4];
+  snprintf(stats[0].value, sizeof(stats[0].value), "%d", statLongestStreak);
+  stats[0].label = tr(STR_GITHUB_LONGEST_STREAK);
+  snprintf(stats[1].value, sizeof(stats[1].value), "%d", statCurrentStreak);
+  stats[1].label = tr(STR_GITHUB_CURRENT_STREAK);
+  if (countsFound) {
+    snprintf(stats[2].value, sizeof(stats[2].value), "%u", (unsigned)statMostInDay);
+    const float avg = cells.empty() ? 0.0f : static_cast<float>(statTotal) / static_cast<float>(cells.size());
+    snprintf(stats[3].value, sizeof(stats[3].value), "%.2f", avg);
+  } else {
+    snprintf(stats[2].value, sizeof(stats[2].value), "-");
+    snprintf(stats[3].value, sizeof(stats[3].value), "-");
+  }
+  stats[2].label = tr(STR_GITHUB_MOST_IN_DAY);
+  stats[3].label = tr(STR_GITHUB_AVG_PER_DAY);
+
+  for (int s = 0; s < 4; s++) {
+    const int colX = sideMargin + (s % 2) * ((pageWidth - 2 * sideMargin) / 2 + 10);
+    const int rowY = 215 + (s / 2) * 105;
+    renderer.fillRectDither(colX - 14, rowY, 8, 62, Color::LightGray);  // accent bar
+    drawBigText(colX, rowY, stats[s].value, 5);
+    renderer.drawText(UI_10_FONT_ID, colX, rowY + 42, stats[s].label);
   }
 
-  // Contribution heatmap: weeks as columns, Sunday-first rows, like GitHub.
+  renderer.fillRect(sideMargin, 445, pageWidth - 2 * sideMargin, 1);
+
+  // --- Heatmap: weeks as columns, Sunday-first rows, tall pill cells ---
   if (!cells.empty()) {
     const int offset = dayOfWeekSunday0(cells.front().date);
     const int weeks = (offset + static_cast<int>(cells.size()) + 6) / 7;
-    constexpr int pitch = 8;    // 7 px cell + 1 px gap
-    constexpr int cellSz = 7;
-    const int gridW = weeks * pitch;
+    constexpr int pitchX = 8;   // 7 px pill + 1 px gap
+    constexpr int cellW = 7;
+    constexpr int pitchY = 20;  // 17 px pill + 3 px gap
+    constexpr int cellH = 17;
+    const int gridW = weeks * pitchX;
     const int x0 = std::max(0, (pageWidth - gridW) / 2);
-    const int y0 = 400;
+    const int y0 = 500;
 
     // Month labels above the columns where a new month starts on a week boundary
     int lastLabelCol = -100;
@@ -392,47 +576,54 @@ void GithubDashboardActivity::renderDashboard() const {
       const int col = slot / 7;
       if (col - lastLabelCol < 4) continue;  // avoid overlapping labels
       if (month >= 1 && month <= 12) {
-        renderer.drawText(SMALL_FONT_ID, x0 + col * pitch, y0 - 18, MONTH_ABBREV[month - 1]);
+        renderer.drawText(SMALL_FONT_ID, x0 + col * pitchX, y0 - 20, MONTH_ABBREV[month - 1]);
         lastLabelCol = col;
       }
     }
 
     for (size_t i = 0; i < cells.size(); i++) {
       const int slot = offset + static_cast<int>(i);
-      const int x = x0 + (slot / 7) * pitch;
-      const int y = y0 + (slot % 7) * pitch;
+      const int x = x0 + (slot / 7) * pitchX;
+      const int y = y0 + (slot % 7) * pitchY;
       switch (cells[i].level) {
         case 0:
-          // faint presence so the grid reads as a calendar, like GitHub's empty cells
-          renderer.fillRect(x + 3, y + 3, 1, 1);
+          // faint dot so the grid still reads as a calendar
+          renderer.fillRect(x + cellW / 2, y + cellH / 2, 1, 2);
           break;
         case 1:
-          renderer.fillRectDither(x, y, cellSz, cellSz, Color::LightGray);
+          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::LightGray);
           break;
         case 2:
-          renderer.fillRectDither(x, y, cellSz, cellSz, Color::DarkGray);
+          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::DarkGray);
           break;
         default:
-          renderer.fillRect(x, y, cellSz, cellSz);
+          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::Black);
           break;
       }
     }
   }
 
-  // Footer: optional last-updated time and a minimal battery icon
-  int footerY = pageHeight - 60;
+  // --- Footer bar: GitHub branding, updated time, username + battery ---
+  const int sepY = pageHeight - 52;
+  renderer.fillRect(0, sepY, pageWidth, 1);
+  const int footerTextY = sepY + 18;
+
+  renderer.drawIcon(GithubIcon, sideMargin - 14, sepY + 10, 32, 32);
+  renderer.drawText(UI_10_FONT_ID, sideMargin + 24, footerTextY, "GitHub", true, EpdFontFamily::BOLD);
+
   if (SETTINGS.clockHasBeenSynced) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
       char line[32];
       snprintf(line, sizeof(line), "%s %s", tr(STR_GITHUB_UPDATED), timeBuf);
-      renderer.drawCenteredText(SMALL_FONT_ID, footerY, line);
+      renderer.drawCenteredText(SMALL_FONT_ID, footerTextY + 3, line);
     }
   }
-  GUI.drawBatteryLeft(
-      renderer,
-      Rect{(pageWidth - metrics.batteryWidth) / 2, footerY + 25, metrics.batteryWidth, metrics.batteryHeight},
-      false);
+
+  const int userW = renderer.getTextWidth(UI_10_FONT_ID, SETTINGS.githubUsername);
+  const int battX = pageWidth - sideMargin + 14 - metrics.batteryWidth;
+  renderer.drawText(UI_10_FONT_ID, battX - 10 - userW, footerTextY, SETTINGS.githubUsername);
+  GUI.drawBatteryLeft(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
 
   // Full refresh: this frame stays on the panel for the whole sleep hour.
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);

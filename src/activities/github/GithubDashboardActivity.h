@@ -45,9 +45,20 @@ class GithubDashboardActivity final : public Activity {
   unsigned long sleepAt = 0;  // 0 = sleep not armed
   const char* errorMessage = nullptr;
 
+  // 54 week columns x 7 rows covers any contribution calendar
+  static constexpr size_t MAX_SLOTS = 384;
+
   std::vector<ContribCell> cells;
-  std::string totalContributions;  // e.g. "3,640" (empty if not found)
+  std::string totalContributions;  // e.g. "3,640" from the heading (fallback)
   std::string parseBuf;            // streaming HTML carry-over buffer
+  uint16_t counts[MAX_SLOTS] = {};  // per-day counts from tool-tips, keyed by table slot (col*7+row)
+  bool countsFound = false;
+
+  // Stats computed after a successful fetch
+  uint32_t statTotal = 0;
+  uint16_t statMostInDay = 0;
+  int statLongestStreak = 0;
+  int statCurrentStreak = 0;
 
   void promptUsername();
   void beginUpdate();
@@ -58,8 +69,13 @@ class GithubDashboardActivity final : public Activity {
   void goToSleepAndPoll();
   void exitDashboardMode();
 
+  void computeStats();
+  bool cellContributed(size_t i, int offset) const;
+
   void renderDashboard() const;
   void renderMessage(const char* message) const;
+  void drawBigText(int x, int y, const char* text, int dot) const;
+  static int bigTextWidth(const char* text, int dot);
 
   static int dayOfWeekSunday0(const char* isoDate);
 };
