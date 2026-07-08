@@ -22,6 +22,9 @@ class CrossPointState {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool showBootScreen = true;
+  // GitHub dashboard mode: set while the device is in the hourly-poll timed
+  // deep sleep cycle so boot can route timer wakes back to the dashboard.
+  bool githubDashboardMode = false;
 
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.

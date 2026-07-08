@@ -257,6 +257,8 @@ class CrossPointSettings {
   uint8_t focusReadingEnabled = 0;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
+  // GitHub username for the contribution dashboard (empty = prompt on entry)
+  char githubUsername[40] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
