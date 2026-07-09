@@ -21,7 +21,6 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
-#include "components/icons/github.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 
@@ -437,6 +436,24 @@ void GithubDashboardActivity::renderMessage(const char* message) const {
   renderer.displayBuffer();
 }
 
+// Small 4x4 contribution-grid glyph for the footer branding (drawIcon assumes
+// portrait orientation, so the landscape dashboard draws its own mark).
+namespace {
+void drawGridMark(const GfxRenderer& renderer, int x, int y, int cell, int gap) {
+  static constexpr uint8_t pattern[4] = {0b1011, 0b0110, 0b1101, 0b1011};  // 1 = filled
+  const int pitch = cell + gap;
+  for (int r = 0; r < 4; r++) {
+    for (int c = 0; c < 4; c++) {
+      if (pattern[r] & (1 << (3 - c))) {
+        renderer.fillRect(x + c * pitch, y + r * pitch, cell, cell);
+      } else {
+        renderer.drawRect(x + c * pitch, y + r * pitch, cell, cell);
+      }
+    }
+  }
+}
+}  // namespace
+
 // 5x7 dot-matrix glyphs for the big stat numbers (digits, '.', 'k').
 // Each glyph is 7 rows of 5 bits, MSB = leftmost column.
 namespace {
@@ -456,7 +473,7 @@ constexpr BigGlyph BIG_GLYPHS[] = {
     {'7', {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000}, 5},
     {'8', {0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110}, 5},
     {'9', {0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100}, 5},
-    {'.', {0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00110, 0b00110}, 3},
+    {'.', {0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11000, 0b11000}, 2},
     {'k', {0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010}, 5},
 };
 
@@ -507,22 +524,24 @@ void GithubDashboardActivity::drawBigText(int x, int y, const char* text, int do
 
 void GithubDashboardActivity::renderDashboard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-  constexpr int sideMargin = 30;
+
+  // The dashboard is a landscape screen; restore the caller's orientation when done.
+  const auto origOrientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+  const auto pageWidth = renderer.getScreenWidth();    // 800
+  const auto pageHeight = renderer.getScreenHeight();  // 480
+  constexpr int sideMargin = 40;
 
   renderer.clearScreen();
 
-  // --- Hero: big compact total + caption (TRMNL style) ---
+  // --- Top left: big compact total + caption (TRMNL style) ---
   char hero[16];
   formatCompact(statTotal, hero, sizeof(hero));
-  renderer.fillRectDither(sideMargin - 14, 55, 8, 70, Color::LightGray);  // accent bar
-  drawBigText(sideMargin, 55, hero, 10);
-  renderer.drawText(UI_10_FONT_ID, sideMargin, 140, tr(STR_GITHUB_CONTRIB_CAPTION));
+  renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);  // accent bar
+  drawBigText(sideMargin, 42, hero, 10);
+  renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
 
-  renderer.fillRect(sideMargin, 185, pageWidth - 2 * sideMargin, 1);
-
-  // --- 2x2 stat grid ---
+  // --- Top right: 2x2 stat grid ---
   struct StatEntry {
     char value[16];
     const char* label;
@@ -544,26 +563,32 @@ void GithubDashboardActivity::renderDashboard() const {
   stats[3].label = tr(STR_GITHUB_AVG_PER_DAY);
 
   for (int s = 0; s < 4; s++) {
-    const int colX = sideMargin + (s % 2) * ((pageWidth - 2 * sideMargin) / 2 + 10);
-    const int rowY = 215 + (s / 2) * 105;
-    renderer.fillRectDither(colX - 14, rowY, 8, 62, Color::LightGray);  // accent bar
+    const int colX = 430 + (s % 2) * 190;
+    const int rowY = 42 + (s / 2) * 78;
+    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);  // accent bar
     drawBigText(colX, rowY, stats[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 42, stats[s].label);
+    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
   }
 
-  renderer.fillRect(sideMargin, 445, pageWidth - 2 * sideMargin, 1);
+  renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
 
-  // --- Heatmap: weeks as columns, Sunday-first rows, tall pill cells ---
+  // --- Heatmap: weeks as columns, Sunday-first rows, GitHub-style grid ---
   if (!cells.empty()) {
     const int offset = dayOfWeekSunday0(cells.front().date);
     const int weeks = (offset + static_cast<int>(cells.size()) + 6) / 7;
-    constexpr int pitchX = 8;   // 7 px pill + 1 px gap
-    constexpr int cellW = 7;
-    constexpr int pitchY = 20;  // 17 px pill + 3 px gap
-    constexpr int cellH = 17;
+    constexpr int cellW = 11;
+    constexpr int pitchX = 13;
+    constexpr int cellH = 14;
+    constexpr int pitchY = 17;
     const int gridW = weeks * pitchX;
-    const int x0 = std::max(0, (pageWidth - gridW) / 2);
-    const int y0 = 500;
+    const int labelGutter = 34;  // room for Mon/Wed/Fri labels
+    const int x0 = std::max(sideMargin + labelGutter, (pageWidth - gridW + labelGutter) / 2);
+    const int y0 = 248;
+
+    // Weekday labels like GitHub (rows are Sunday-first)
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 1 * pitchY + 2, "Mon");
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 3 * pitchY + 2, "Wed");
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 5 * pitchY + 2, "Fri");
 
     // Month labels above the columns where a new month starts on a week boundary
     int lastLabelCol = -100;
@@ -574,13 +599,14 @@ void GithubDashboardActivity::renderDashboard() const {
       const int day = atoi(cells[i].date + 8);
       if (day > 7) continue;  // not the first week of the month
       const int col = slot / 7;
-      if (col - lastLabelCol < 4) continue;  // avoid overlapping labels
+      if (col - lastLabelCol < 3) continue;  // avoid overlapping labels
       if (month >= 1 && month <= 12) {
         renderer.drawText(SMALL_FONT_ID, x0 + col * pitchX, y0 - 20, MONTH_ABBREV[month - 1]);
         lastLabelCol = col;
       }
     }
 
+    // Crisp level ramp for 1-bit e-ink: dot, outline, gray fill, solid black.
     for (size_t i = 0; i < cells.size(); i++) {
       const int slot = offset + static_cast<int>(i);
       const int x = x0 + (slot / 7) * pitchX;
@@ -588,28 +614,29 @@ void GithubDashboardActivity::renderDashboard() const {
       switch (cells[i].level) {
         case 0:
           // faint dot so the grid still reads as a calendar
-          renderer.fillRect(x + cellW / 2, y + cellH / 2, 1, 2);
+          renderer.fillRect(x + cellW / 2, y + cellH / 2, 2, 2);
           break;
         case 1:
-          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::LightGray);
+          renderer.drawRoundedRect(x, y, cellW, cellH, 1, 2, true);
           break;
         case 2:
-          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::DarkGray);
+          renderer.drawRoundedRect(x, y, cellW, cellH, 1, 2, true);
+          renderer.fillRectDither(x + 2, y + 2, cellW - 4, cellH - 4, Color::DarkGray);
           break;
         default:
-          renderer.fillRoundedRect(x, y, cellW, cellH, 3, Color::Black);
+          renderer.fillRoundedRect(x, y, cellW, cellH, 2, Color::Black);
           break;
       }
     }
   }
 
   // --- Footer bar: GitHub branding, updated time, username + battery ---
-  const int sepY = pageHeight - 52;
-  renderer.fillRect(0, sepY, pageWidth, 1);
+  const int sepY = pageHeight - 54;
+  renderer.fillRect(sideMargin, sepY, pageWidth - 2 * sideMargin, 1);
   const int footerTextY = sepY + 18;
 
-  renderer.drawIcon(GithubIcon, sideMargin - 14, sepY + 10, 32, 32);
-  renderer.drawText(UI_10_FONT_ID, sideMargin + 24, footerTextY, "GitHub", true, EpdFontFamily::BOLD);
+  drawGridMark(renderer, sideMargin, sepY + 15, 5, 2);  // 26px mini contribution grid
+  renderer.drawText(UI_10_FONT_ID, sideMargin + 38, footerTextY, "GitHub", true, EpdFontFamily::BOLD);
 
   if (SETTINGS.clockHasBeenSynced) {
     char timeBuf[9];
@@ -621,10 +648,11 @@ void GithubDashboardActivity::renderDashboard() const {
   }
 
   const int userW = renderer.getTextWidth(UI_10_FONT_ID, SETTINGS.githubUsername);
-  const int battX = pageWidth - sideMargin + 14 - metrics.batteryWidth;
+  const int battX = pageWidth - sideMargin - metrics.batteryWidth;
   renderer.drawText(UI_10_FONT_ID, battX - 10 - userW, footerTextY, SETTINGS.githubUsername);
   GUI.drawBatteryLeft(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
 
   // Full refresh: this frame stays on the panel for the whole sleep hour.
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  renderer.setOrientation(origOrientation);
 }
