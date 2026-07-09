@@ -60,6 +60,10 @@ class GithubDashboardActivity final : public Activity {
   int statLongestStreak = 0;
   int statCurrentStreak = 0;
 
+  // "Updated Jul 8 14:32" stamp captured after each successful fetch, from the
+  // ESP32's internal clock (SNTP-synced; the X4 has no hardware RTC).
+  char lastUpdated[24] = "";
+
   void promptUsername();
   void beginUpdate();
   void startDirectWifiConnect();
@@ -71,6 +75,8 @@ class GithubDashboardActivity final : public Activity {
 
   void computeStats();
   bool cellContributed(size_t i, int offset) const;
+  static void syncSystemClock();
+  void captureUpdateTime();
 
   void renderDashboard() const;
   void renderMessage(const char* message) const;

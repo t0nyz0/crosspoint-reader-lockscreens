@@ -1,10 +1,12 @@
 #include "GithubDashboardActivity.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_sntp.h>
+
+#include <ctime>
 
 #include <algorithm>
 #include <cctype>
@@ -208,6 +210,36 @@ void GithubDashboardActivity::loop() {
   }
 }
 
+// Sync the ESP32 internal clock via SNTP while WiFi is up. The RTC domain
+// stays powered through the dashboard's timed deep sleep, so once set the
+// time survives between hourly polls and we only pay the SNTP wait once.
+void GithubDashboardActivity::syncSystemClock() {
+  time_t now = time(nullptr);
+  if (now > 1735689600) return;  // already valid (>= 2025-01-01)
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  LOG_INF("GH", "Syncing system clock via SNTP");
+  configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
+  for (int i = 0; i < 50; i++) {  // up to ~5s
+    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) return;
+    delay(100);
+  }
+  LOG_ERR("GH", "SNTP sync timed out");
+}
+
+void GithubDashboardActivity::captureUpdateTime() {
+  time_t now = time(nullptr);
+  if (now <= 1735689600) {
+    lastUpdated[0] = '\0';  // clock never synced; hide the stamp rather than lie
+    return;
+  }
+  // Apply the user's UTC offset from the clock settings (quarter-hour steps, biased by 48).
+  now += (static_cast<int>(SETTINGS.clockUtcOffsetQ) - 48) * 15 * 60;
+  struct tm ti;
+  gmtime_r(&now, &ti);
+  strftime(lastUpdated, sizeof(lastUpdated), SETTINGS.clockFormat == 1 ? "%b %d %I:%M %p" : "%b %d %H:%M", &ti);
+}
+
 void GithubDashboardActivity::runFetch() {
   cells.clear();
   cells.reserve(MAX_CELLS);
@@ -215,6 +247,8 @@ void GithubDashboardActivity::runFetch() {
   parseBuf.clear();
   memset(counts, 0, sizeof(counts));
   countsFound = false;
+
+  syncSystemClock();
 
   char url[128];
   snprintf(url, sizeof(url), "https://github.com/users/%s/contributions", SETTINGS.githubUsername);
@@ -233,6 +267,7 @@ void GithubDashboardActivity::runFetch() {
     std::sort(cells.begin(), cells.end(),
               [](const ContribCell& a, const ContribCell& b) { return strcmp(a.date, b.date) < 0; });
     computeStats();
+    captureUpdateTime();
     LOG_INF("GH", "Parsed %u days, total %u, streak %d/%d, max %u", (unsigned)cells.size(), (unsigned)statTotal,
             statCurrentStreak, statLongestStreak, (unsigned)statMostInDay);
     state = State::Showing;
@@ -638,13 +673,10 @@ void GithubDashboardActivity::renderDashboard() const {
   drawGridMark(renderer, sideMargin, sepY + 15, 5, 2);  // 26px mini contribution grid
   renderer.drawText(UI_10_FONT_ID, sideMargin + 38, footerTextY, "GitHub", true, EpdFontFamily::BOLD);
 
-  if (SETTINGS.clockHasBeenSynced) {
-    char timeBuf[9];
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
-      char line[32];
-      snprintf(line, sizeof(line), "%s %s", tr(STR_GITHUB_UPDATED), timeBuf);
-      renderer.drawCenteredText(SMALL_FONT_ID, footerTextY + 3, line);
-    }
+  if (lastUpdated[0] != '\0') {
+    char line[40];
+    snprintf(line, sizeof(line), "%s %s", tr(STR_GITHUB_UPDATED), lastUpdated);
+    renderer.drawCenteredText(UI_10_FONT_ID, footerTextY, line);
   }
 
   const int userW = renderer.getTextWidth(UI_10_FONT_ID, SETTINGS.githubUsername);
