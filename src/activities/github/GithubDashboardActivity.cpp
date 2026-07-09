@@ -139,6 +139,14 @@ void GithubDashboardActivity::beginUpdate() {
 }
 
 void GithubDashboardActivity::startDirectWifiConnect() {
+  // On an unattended timer-wake boot nothing has loaded the credential store
+  // yet (the WiFi picker normally does it) — without this the store is empty
+  // and every hourly reconnect fails. SD access needs the SPI render lock.
+  {
+    RenderLock lock(*this);
+    WIFI_STORE.loadFromFile();
+  }
+
   const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
   const WifiCredential* cred = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
   if (!cred) {
