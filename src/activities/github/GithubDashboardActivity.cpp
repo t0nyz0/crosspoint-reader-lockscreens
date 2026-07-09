@@ -229,28 +229,49 @@ void GithubDashboardActivity::syncSystemClock() {
 
 // Detect the local UTC offset from the connection's IP and persist it to the
 // clock settings, so the "Updated" stamp (and the reader clock features) show
-// local time without manual setup. Only runs while the offset is still the
-// UTC+0 default; a manually configured offset is never overridden.
+// local time without manual setup. Re-checked on every poll so DST changes
+// correct themselves within an hour.
 void GithubDashboardActivity::autoDetectTimezone() {
-  if (SETTINGS.clockUtcOffsetQ != 48) return;
+  int offsetSeconds = 0;
+  bool found = false;
 
+  // Primary: ip-api.com (free tier is plain http; offset includes DST)
   std::string body;
-  if (!HttpDownloader::fetchUrl("https://worldtimeapi.org/api/ip", body)) {
-    LOG_ERR("GH", "Timezone lookup failed");
+  if (HttpDownloader::fetchUrl("http://ip-api.com/json/?fields=status,offset", body)) {
+    const size_t p = body.find("\"offset\":");
+    if (p != std::string::npos && body.find("\"success\"") != std::string::npos) {
+      offsetSeconds = atoi(body.c_str() + p + 9);
+      found = true;
+    }
+  }
+
+  // Fallback: worldtimeapi.org ("utc_offset":"-05:00")
+  if (!found) {
+    body.clear();
+    if (HttpDownloader::fetchUrl("https://worldtimeapi.org/api/ip", body)) {
+      const size_t p = body.find("\"utc_offset\":\"");
+      if (p != std::string::npos && p + 20 <= body.size()) {
+        const char* s = body.c_str() + p + 14;  // e.g. "-05:00"
+        if ((s[0] == '+' || s[0] == '-') && isdigit(static_cast<unsigned char>(s[1]))) {
+          const int sign = s[0] == '-' ? -1 : 1;
+          offsetSeconds = sign * (atoi(s + 1) * 3600 + atoi(s + 4) * 60);
+          found = true;
+        }
+      }
+    }
+  }
+
+  if (!found || offsetSeconds < -14 * 3600 || offsetSeconds > 14 * 3600) {
+    LOG_ERR("GH", "Timezone lookup failed, keeping current offset");
     return;
   }
-  const size_t p = body.find("\"utc_offset\":\"");
-  if (p == std::string::npos || p + 20 > body.size()) return;
-  const char* s = body.c_str() + p + 14;  // e.g. "-07:00"
-  if ((s[0] != '+' && s[0] != '-') || !isdigit(static_cast<unsigned char>(s[1]))) return;
-  const int sign = s[0] == '-' ? -1 : 1;
-  const int hours = atoi(s + 1);
-  const int minutes = atoi(s + 4);
-  if (hours > 14 || minutes > 59) return;
-  const int quarters = sign * (hours * 4 + minutes / 15);
-  SETTINGS.clockUtcOffsetQ = static_cast<uint8_t>(48 + quarters);
-  SETTINGS.saveToFile();
-  LOG_INF("GH", "Timezone auto-detected: UTC%c%02d:%02d", s[0], hours, minutes);
+
+  const uint8_t offsetQ = static_cast<uint8_t>(48 + offsetSeconds / 900);
+  if (offsetQ != SETTINGS.clockUtcOffsetQ) {
+    SETTINGS.clockUtcOffsetQ = offsetQ;
+    SETTINGS.saveToFile();
+  }
+  LOG_INF("GH", "Timezone: UTC%+d min", offsetSeconds / 60);
 }
 
 void GithubDashboardActivity::captureUpdateTime() {
@@ -259,11 +280,14 @@ void GithubDashboardActivity::captureUpdateTime() {
     lastUpdated[0] = '\0';  // clock never synced; hide the stamp rather than lie
     return;
   }
-  // Apply the user's UTC offset from the clock settings (quarter-hour steps, biased by 48).
+  // Apply the auto-detected UTC offset (quarter-hour steps, biased by 48).
   now += (static_cast<int>(SETTINGS.clockUtcOffsetQ) - 48) * 15 * 60;
   struct tm ti;
   gmtime_r(&now, &ti);
-  strftime(lastUpdated, sizeof(lastUpdated), SETTINGS.clockFormat == 1 ? "%b %d %I:%M %p" : "%b %d %H:%M", &ti);
+  int hour12 = ti.tm_hour % 12;
+  if (hour12 == 0) hour12 = 12;
+  snprintf(lastUpdated, sizeof(lastUpdated), "%s %d %d:%02d %s", MONTH_ABBREV[ti.tm_mon], ti.tm_mday, hour12,
+           ti.tm_min, ti.tm_hour < 12 ? "AM" : "PM");
 }
 
 void GithubDashboardActivity::runFetch() {
