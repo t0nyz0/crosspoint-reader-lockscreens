@@ -22,9 +22,7 @@ enum class HomeMenuItem {
   FILE_BROWSER,
   RECENTS,
   OPDS_BROWSER,
-  GITHUB_DASHBOARD,
-  WEATHER_DASHBOARD,
-  TEMPEST_DASHBOARD,
+  LOCK_SCREENS,
   FILE_TRANSFER,
   SETTINGS_MENU
 };
@@ -99,6 +97,7 @@ class ActivityManager {
   void goToGithubDashboard();
   void goToWeatherDashboard();
   void goToTempestDashboard();
+  void goToLockScreens();
   void goToReader(std::string path);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

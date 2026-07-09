@@ -14,6 +14,7 @@
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/RecentBooksActivity.h"
+#include "lockscreens/LockScreensActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -210,6 +211,10 @@ void ActivityManager::goToTempestDashboard() {
   replaceActivity(std::make_unique<TempestDashboardActivity>(renderer, mappedInput));
 }
 
+void ActivityManager::goToLockScreens() {
+  replaceActivity(std::make_unique<LockScreensActivity>(renderer, mappedInput));
+}
+
 void ActivityManager::goToReader(std::string path) {
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
 }
@@ -234,12 +239,9 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::RECENTS;
     } else if (activityName == "OpdsBookBrowser") {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
-    } else if (activityName == "GithubDashboard") {
-      initialMenuItem = HomeMenuItem::GITHUB_DASHBOARD;
-    } else if (activityName == "WeatherDashboard") {
-      initialMenuItem = HomeMenuItem::WEATHER_DASHBOARD;
-    } else if (activityName == "TempestDashboard") {
-      initialMenuItem = HomeMenuItem::TEMPEST_DASHBOARD;
+    } else if (activityName == "GithubDashboard" || activityName == "WeatherDashboard" ||
+               activityName == "TempestDashboard" || activityName == "LockScreens") {
+      initialMenuItem = HomeMenuItem::LOCK_SCREENS;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {

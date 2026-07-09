@@ -23,6 +23,7 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/lockscreens.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/tempest.h"
@@ -85,6 +86,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return WeatherIcon;
       case UIIcon::Tempest:
         return TempestIcon;
+      case UIIcon::LockScreens:
+        return LockscreensIcon;
       default:
         return nullptr;
     }
