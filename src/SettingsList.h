@@ -193,10 +193,22 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,
                             "moveFinishedToReadFolder", StrId::STR_CAT_SYSTEM),
-        // Web/JSON only (edited on-device inside the GitHub dashboard itself);
-        // the category keeps it out of the four device settings tabs.
+        // Dashboard poll intervals — real device System-tab settings so they're
+        // directly tunable from Settings > System, like Time to Sleep.
+        SettingInfo::Value(StrId::STR_GITHUB_REFRESH_INTERVAL, &CrossPointSettings::githubRefreshMinutes, {5, 240, 5},
+                           "githubRefreshMinutes", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Value(StrId::STR_WEATHER_REFRESH_INTERVAL, &CrossPointSettings::weatherRefreshMinutes,
+                           {5, 240, 5}, "weatherRefreshMinutes", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Value(StrId::STR_TEMPEST_REFRESH_INTERVAL, &CrossPointSettings::tempestRefreshMinutes, {2, 60, 1},
+                           "tempestRefreshMinutes", StrId::STR_CAT_SYSTEM),
+        // Web/JSON only (edited on-device inside each dashboard itself); the
+        // category keeps these out of the four device settings tabs.
         SettingInfo::String(StrId::STR_GITHUB_USERNAME, SETTINGS.githubUsername,
                             sizeof(SETTINGS.githubUsername) - 1, "githubUsername", StrId::STR_GITHUB_DASHBOARD),
+        SettingInfo::String(StrId::STR_WEATHER_ZIP, SETTINGS.weatherZip, sizeof(SETTINGS.weatherZip) - 1,
+                            "weatherZip", StrId::STR_WEATHER_DASHBOARD),
+        SettingInfo::String(StrId::STR_TEMPEST_LABEL, SETTINGS.tempestLabel, sizeof(SETTINGS.tempestLabel) - 1,
+                            "tempestLabel", StrId::STR_TEMPEST_DASHBOARD),
 
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(

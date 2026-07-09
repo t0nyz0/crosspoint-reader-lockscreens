@@ -259,6 +259,21 @@ class CrossPointSettings {
   char sdFontFamilyName[32] = "";
   // GitHub username for the contribution dashboard (empty = prompt on entry)
   char githubUsername[40] = "";
+  // US ZIP code for the general weather dashboard (empty = prompt on entry)
+  char weatherZip[8] = "";
+  // Optional friendly label for the Tempest local-station dashboard (empty = "Tempest")
+  char tempestLabel[24] = "";
+  // Poll intervals for the timed dashboards, in minutes
+  uint8_t githubRefreshMinutes = 60;
+  uint8_t weatherRefreshMinutes = 30;
+  uint8_t tempestRefreshMinutes = 10;
+  // Cached ZIP -> lat/lon geocode for the weather dashboard, stored as decimal
+  // strings (settings only support uint8_t/char[] fields). Not user-editable;
+  // saved/loaded manually since a derived cache doesn't belong in SettingsList.
+  char weatherGeocodedZip[8] = "";
+  char weatherLat[16] = "";
+  char weatherLon[16] = "";
+  char weatherPlaceName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)

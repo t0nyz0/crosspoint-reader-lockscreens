@@ -41,6 +41,10 @@ class HomeActivity final : public Activity {
     if (hasOpdsUrl) ++i;
     if (item == HomeMenuItem::GITHUB_DASHBOARD) return i;
     ++i;
+    if (item == HomeMenuItem::WEATHER_DASHBOARD) return i;
+    ++i;
+    if (item == HomeMenuItem::TEMPEST_DASHBOARD) return i;
+    ++i;
     if (item == HomeMenuItem::FILE_TRANSFER) return i;
     ++i;
     if (item == HomeMenuItem::SETTINGS_MENU) return i;
@@ -54,6 +58,8 @@ class HomeActivity final : public Activity {
     if (idx == i++) return HomeMenuItem::RECENTS;
     if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
     if (idx == i++) return HomeMenuItem::GITHUB_DASHBOARD;
+    if (idx == i++) return HomeMenuItem::WEATHER_DASHBOARD;
+    if (idx == i++) return HomeMenuItem::TEMPEST_DASHBOARD;
     if (idx == i++) return HomeMenuItem::FILE_TRANSFER;
     if (idx == i) return HomeMenuItem::SETTINGS_MENU;
     return HomeMenuItem::NONE;
@@ -65,6 +71,8 @@ class HomeActivity final : public Activity {
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
   void onGithubDashboardOpen();
+  void onWeatherDashboardOpen();
+  void onTempestDashboardOpen();
 
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image

@@ -78,7 +78,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["readerActivityLoadCount"] = s.readerActivityLoadCount;
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["showBootScreen"] = s.showBootScreen;
-  doc["githubDashboardMode"] = s.githubDashboardMode;
+  doc["activeDashboardMode"] = s.activeDashboardMode;
 
   String json;
   serializeJson(doc, json);
@@ -114,7 +114,7 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.readerActivityLoadCount = doc["readerActivityLoadCount"] | static_cast<uint8_t>(0);
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   s.showBootScreen = doc["showBootScreen"] | true;
-  s.githubDashboardMode = doc["githubDashboardMode"] | false;
+  s.activeDashboardMode = doc["activeDashboardMode"] | static_cast<uint8_t>(0);
   return true;
 }
 
@@ -150,6 +150,13 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // SD card font family name — not in SettingsList, save manually
   if (s.sdFontFamilyName[0] != '\0') {
     doc["sdFontFamilyName"] = s.sdFontFamilyName;
+  }
+  // Cached ZIP -> lat/lon geocode for the weather dashboard — derived data, not in SettingsList
+  if (s.weatherGeocodedZip[0] != '\0') {
+    doc["weatherGeocodedZip"] = s.weatherGeocodedZip;
+    doc["weatherLat"] = s.weatherLat;
+    doc["weatherLon"] = s.weatherLon;
+    doc["weatherPlaceName"] = s.weatherPlaceName;
   }
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
@@ -262,6 +269,16 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   if (doc["language"].is<const char*>()) {
     s.language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
   }
+
+  // Cached ZIP -> lat/lon geocode for the weather dashboard — not in SettingsList, load manually
+  strncpy(s.weatherGeocodedZip, doc["weatherGeocodedZip"] | "", sizeof(s.weatherGeocodedZip) - 1);
+  s.weatherGeocodedZip[sizeof(s.weatherGeocodedZip) - 1] = '\0';
+  strncpy(s.weatherLat, doc["weatherLat"] | "", sizeof(s.weatherLat) - 1);
+  s.weatherLat[sizeof(s.weatherLat) - 1] = '\0';
+  strncpy(s.weatherLon, doc["weatherLon"] | "", sizeof(s.weatherLon) - 1);
+  s.weatherLon[sizeof(s.weatherLon) - 1] = '\0';
+  strncpy(s.weatherPlaceName, doc["weatherPlaceName"] | "", sizeof(s.weatherPlaceName) - 1);
+  s.weatherPlaceName[sizeof(s.weatherPlaceName) - 1] = '\0';
 
   LOG_DBG("CPS", "Settings loaded from file");
 

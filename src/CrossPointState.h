@@ -22,9 +22,12 @@ class CrossPointState {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool showBootScreen = true;
-  // GitHub dashboard mode: set while the device is in the hourly-poll timed
-  // deep sleep cycle so boot can route timer wakes back to the dashboard.
-  bool githubDashboardMode = false;
+
+  // Which timed-poll dashboard (if any) is armed for its hourly/periodic timed
+  // deep sleep cycle. Boot uses this to route an RTC timer wake back into the
+  // right dashboard activity; any other wake reason clears it back to NONE.
+  enum ActiveDashboard : uint8_t { DASHBOARD_NONE = 0, DASHBOARD_GITHUB = 1, DASHBOARD_WEATHER = 2, DASHBOARD_TEMPEST = 3 };
+  uint8_t activeDashboardMode = DASHBOARD_NONE;
 
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.

@@ -26,11 +26,13 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
-#include "GithubDashboardSleep.h"
+#include "DashboardSleep.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/github/GithubDashboardActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "activities/tempest/TempestDashboardActivity.h"
+#include "activities/weather/WeatherDashboardActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
@@ -272,11 +274,12 @@ void enterDeepSleep(bool fromTimeout = false) {
   powerManager.startDeepSleep(gpio);
 }
 
-// Timed deep sleep for the GitHub dashboard mode. The dashboard frame stays on
-// the panel; the RTC timer wakes us for the next poll, the power button wakes
-// us to exit the mode. Never switches activity (the current frame IS the
-// sleep screen), so it is safe to call from inside an activity's loop().
-void enterGithubDashboardSleep(uint32_t seconds) {
+// Timed deep sleep for any polling dashboard mode (GitHub/Weather/Tempest).
+// The dashboard frame stays on the panel; the RTC timer wakes us for the next
+// poll, the power button wakes us to exit the mode. Never switches activity
+// (the current frame IS the sleep screen), so it is safe to call from inside
+// an activity's loop().
+void enterDashboardSleep(uint32_t seconds) {
   HalPowerManager::Lock powerLock;
   deepSleepInProgress = true;
   APP_STATE.saveToFile();
@@ -378,16 +381,17 @@ void setup() {
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
-  // GitHub dashboard mode: an RTC timer wake means "poll and redraw"; any
-  // other wake (power button, cold boot) exits the mode back to normal use.
-  bool githubDashboardResume = false;
-  if (APP_STATE.githubDashboardMode) {
+  // Polling dashboard mode (GitHub/Weather/Tempest): an RTC timer wake means
+  // "poll and redraw"; any other wake (power button, cold boot) exits the
+  // mode back to normal use.
+  uint8_t dashboardResume = CrossPointState::DASHBOARD_NONE;
+  if (APP_STATE.activeDashboardMode != CrossPointState::DASHBOARD_NONE) {
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-      LOG_INF("MAIN", "Timer wake: refreshing GitHub dashboard");
-      githubDashboardResume = true;
+      LOG_INF("MAIN", "Timer wake: refreshing dashboard mode %u", APP_STATE.activeDashboardMode);
+      dashboardResume = APP_STATE.activeDashboardMode;
     } else {
-      LOG_INF("MAIN", "Non-timer wake: leaving GitHub dashboard mode");
-      APP_STATE.githubDashboardMode = false;
+      LOG_INF("MAIN", "Non-timer wake: leaving dashboard mode");
+      APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_NONE;
       APP_STATE.saveToFile();
     }
   }
@@ -441,9 +445,10 @@ void setup() {
                             : !APP_STATE.showBootScreen ? BootResume::QuickResume
                                                         : BootResume::Splash;
 
-  setupDisplayAndFonts(resume != BootResume::Splash || githubDashboardResume);
+  const bool dashboardResumeActive = dashboardResume != CrossPointState::DASHBOARD_NONE;
+  setupDisplayAndFonts(resume != BootResume::Splash || dashboardResumeActive);
 
-  switch (githubDashboardResume ? BootResume::Silent : resume) {
+  switch (dashboardResumeActive ? BootResume::Silent : resume) {
     case BootResume::Silent:
       // Splash skipped: the routing block below picks the target activity; the
       // panel keeps showing the pre-reboot popup until that first paint lands.
@@ -468,10 +473,16 @@ void setup() {
       break;
   }
 
-  if (githubDashboardResume) {
-    // Unattended hourly poll: refresh the dashboard and go back to timed sleep.
+  if (dashboardResume == CrossPointState::DASHBOARD_GITHUB) {
+    // Unattended timer wake: refresh the dashboard and go back to timed sleep.
     activityManager.replaceActivity(
         std::make_unique<GithubDashboardActivity>(renderer, mappedInputManager, /*autoRefresh=*/true));
+  } else if (dashboardResume == CrossPointState::DASHBOARD_WEATHER) {
+    activityManager.replaceActivity(
+        std::make_unique<WeatherDashboardActivity>(renderer, mappedInputManager, /*autoRefresh=*/true));
+  } else if (dashboardResume == CrossPointState::DASHBOARD_TEMPEST) {
+    activityManager.replaceActivity(
+        std::make_unique<TempestDashboardActivity>(renderer, mappedInputManager, /*autoRefresh=*/true));
   } else if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(

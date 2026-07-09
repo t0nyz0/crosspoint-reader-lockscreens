@@ -403,6 +403,13 @@ void SettingsActivity::render(RenderLock&&) {
                        static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
               valueText = valueBuffer;
             }
+          } else if (setting.nameId == StrId::STR_GITHUB_REFRESH_INTERVAL ||
+                     setting.nameId == StrId::STR_WEATHER_REFRESH_INTERVAL ||
+                     setting.nameId == StrId::STR_TEMPEST_REFRESH_INTERVAL) {
+            char valueBuffer[32];
+            snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+                     static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
+            valueText = valueBuffer;
           } else {
             valueText = std::to_string(SETTINGS.*(setting.valuePtr));
           }

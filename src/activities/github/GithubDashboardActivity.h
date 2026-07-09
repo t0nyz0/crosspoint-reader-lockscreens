@@ -31,8 +31,6 @@ class GithubDashboardActivity final : public Activity {
     uint8_t level;  // 0-4 as reported by GitHub
   };
 
-  // Poll GitHub once per hour while in dashboard mode
-  static constexpr uint32_t POLL_INTERVAL_S = 3600;
   // Unattended (timer wake) WiFi connect timeout before giving up until next poll
   static constexpr unsigned long WIFI_TIMEOUT_MS = 45000;
   // Interactive window to read the dashboard / back out before the mode arms
@@ -75,14 +73,6 @@ class GithubDashboardActivity final : public Activity {
 
   void computeStats();
   bool cellContributed(size_t i, int offset) const;
-  static void syncSystemClock();
-  static void autoDetectTimezone();
-  void captureUpdateTime();
-
   void renderDashboard() const;
   void renderMessage(const char* message) const;
-  void drawBigText(int x, int y, const char* text, int dot) const;
-  static int bigTextWidth(const char* text, int dot);
-
-  static int dayOfWeekSunday0(const char* isoDate);
 };

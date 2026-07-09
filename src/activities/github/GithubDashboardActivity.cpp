@@ -16,10 +16,11 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
-#include "GithubDashboardSleep.h"
+#include "DashboardSleep.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "activities/dashboard/DashboardUI.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -152,7 +153,7 @@ void GithubDashboardActivity::startDirectWifiConnect() {
   if (!cred) {
     LOG_ERR("GH", "No saved WiFi network for unattended refresh");
     state = State::Failed;
-    errorMessage = tr(STR_GITHUB_WIFI_FAILED);
+    errorMessage = tr(STR_DASHBOARD_WIFI_FAILED);
     return;  // loop() paints the error and re-arms the next poll
   }
 
@@ -173,7 +174,7 @@ void GithubDashboardActivity::loop() {
       if (millis() - wifiConnectStart >= WIFI_TIMEOUT_MS) {
         LOG_ERR("GH", "Unattended WiFi connect timed out");
         state = State::Failed;
-        errorMessage = tr(STR_GITHUB_WIFI_FAILED);
+        errorMessage = tr(STR_DASHBOARD_WIFI_FAILED);
         requestUpdateAndWait();
         // Keep the mode alive: try again at the next poll instead of draining
         // the battery waiting for input that isn't coming.
@@ -218,86 +219,6 @@ void GithubDashboardActivity::loop() {
   }
 }
 
-// Sync the ESP32 internal clock via SNTP while WiFi is up. The RTC domain
-// stays powered through the dashboard's timed deep sleep, so once set the
-// time survives between hourly polls and we only pay the SNTP wait once.
-void GithubDashboardActivity::syncSystemClock() {
-  time_t now = time(nullptr);
-  if (now > 1735689600) return;  // already valid (>= 2025-01-01)
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  LOG_INF("GH", "Syncing system clock via SNTP");
-  configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
-  for (int i = 0; i < 50; i++) {  // up to ~5s
-    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) return;
-    delay(100);
-  }
-  LOG_ERR("GH", "SNTP sync timed out");
-}
-
-// Detect the local UTC offset from the connection's IP and persist it to the
-// clock settings, so the "Updated" stamp (and the reader clock features) show
-// local time without manual setup. Re-checked on every poll so DST changes
-// correct themselves within an hour.
-void GithubDashboardActivity::autoDetectTimezone() {
-  int offsetSeconds = 0;
-  bool found = false;
-
-  // Primary: ip-api.com (free tier is plain http; offset includes DST)
-  std::string body;
-  if (HttpDownloader::fetchUrl("http://ip-api.com/json/?fields=status,offset", body)) {
-    const size_t p = body.find("\"offset\":");
-    if (p != std::string::npos && body.find("\"success\"") != std::string::npos) {
-      offsetSeconds = atoi(body.c_str() + p + 9);
-      found = true;
-    }
-  }
-
-  // Fallback: worldtimeapi.org ("utc_offset":"-05:00")
-  if (!found) {
-    body.clear();
-    if (HttpDownloader::fetchUrl("https://worldtimeapi.org/api/ip", body)) {
-      const size_t p = body.find("\"utc_offset\":\"");
-      if (p != std::string::npos && p + 20 <= body.size()) {
-        const char* s = body.c_str() + p + 14;  // e.g. "-05:00"
-        if ((s[0] == '+' || s[0] == '-') && isdigit(static_cast<unsigned char>(s[1]))) {
-          const int sign = s[0] == '-' ? -1 : 1;
-          offsetSeconds = sign * (atoi(s + 1) * 3600 + atoi(s + 4) * 60);
-          found = true;
-        }
-      }
-    }
-  }
-
-  if (!found || offsetSeconds < -14 * 3600 || offsetSeconds > 14 * 3600) {
-    LOG_ERR("GH", "Timezone lookup failed, keeping current offset");
-    return;
-  }
-
-  const uint8_t offsetQ = static_cast<uint8_t>(48 + offsetSeconds / 900);
-  if (offsetQ != SETTINGS.clockUtcOffsetQ) {
-    SETTINGS.clockUtcOffsetQ = offsetQ;
-    SETTINGS.saveToFile();
-  }
-  LOG_INF("GH", "Timezone: UTC%+d min", offsetSeconds / 60);
-}
-
-void GithubDashboardActivity::captureUpdateTime() {
-  time_t now = time(nullptr);
-  if (now <= 1735689600) {
-    lastUpdated[0] = '\0';  // clock never synced; hide the stamp rather than lie
-    return;
-  }
-  // Apply the auto-detected UTC offset (quarter-hour steps, biased by 48).
-  now += (static_cast<int>(SETTINGS.clockUtcOffsetQ) - 48) * 15 * 60;
-  struct tm ti;
-  gmtime_r(&now, &ti);
-  int hour12 = ti.tm_hour % 12;
-  if (hour12 == 0) hour12 = 12;
-  snprintf(lastUpdated, sizeof(lastUpdated), "%s %d %d:%02d %s", MONTH_ABBREV[ti.tm_mon], ti.tm_mday, hour12,
-           ti.tm_min, ti.tm_hour < 12 ? "AM" : "PM");
-}
-
 void GithubDashboardActivity::runFetch() {
   cells.clear();
   cells.reserve(MAX_CELLS);
@@ -306,8 +227,7 @@ void GithubDashboardActivity::runFetch() {
   memset(counts, 0, sizeof(counts));
   countsFound = false;
 
-  syncSystemClock();
-  autoDetectTimezone();
+  DashboardUI::syncClockAndTimezone();
 
   char url[128];
   snprintf(url, sizeof(url), "https://github.com/users/%s/contributions", SETTINGS.githubUsername);
@@ -326,7 +246,7 @@ void GithubDashboardActivity::runFetch() {
     std::sort(cells.begin(), cells.end(),
               [](const ContribCell& a, const ContribCell& b) { return strcmp(a.date, b.date) < 0; });
     computeStats();
-    captureUpdateTime();
+    DashboardUI::formatUpdatedStamp(lastUpdated, sizeof(lastUpdated));
     LOG_INF("GH", "Parsed %u days, total %u, streak %d/%d, max %u", (unsigned)cells.size(), (unsigned)statTotal,
             statCurrentStreak, statLongestStreak, (unsigned)statMostInDay);
     state = State::Showing;
@@ -422,7 +342,7 @@ void GithubDashboardActivity::computeStats() {
   statCurrentStreak = 0;
   if (cells.empty()) return;
 
-  const int offset = dayOfWeekSunday0(cells.front().date);
+  const int offset = DashboardUI::dayOfWeekSunday0(cells.front().date);
 
   int streak = 0;
   for (size_t i = 0; i < cells.size(); i++) {
@@ -476,28 +396,20 @@ void GithubDashboardActivity::scanForTotal() {
 }
 
 void GithubDashboardActivity::goToSleepAndPoll() {
-  APP_STATE.githubDashboardMode = true;
+  APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_GITHUB;
   APP_STATE.saveToFile();
-  LOG_INF("GH", "Dashboard armed, sleeping for %u s", (unsigned)POLL_INTERVAL_S);
-  enterGithubDashboardSleep(POLL_INTERVAL_S);  // does not return
+  const uint32_t intervalS = SETTINGS.githubRefreshMinutes * 60u;
+  LOG_INF("GH", "Dashboard armed, sleeping for %u s", (unsigned)intervalS);
+  enterDashboardSleep(intervalS);  // does not return
 }
 
 void GithubDashboardActivity::exitDashboardMode() {
-  if (APP_STATE.githubDashboardMode) {
-    APP_STATE.githubDashboardMode = false;
+  if (APP_STATE.activeDashboardMode == CrossPointState::DASHBOARD_GITHUB) {
+    APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_NONE;
     APP_STATE.saveToFile();
   }
 }
 
-int GithubDashboardActivity::dayOfWeekSunday0(const char* isoDate) {
-  // Sakamoto's algorithm, 0 = Sunday
-  int y = atoi(isoDate);
-  const int m = atoi(isoDate + 5);
-  const int d = atoi(isoDate + 8);
-  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-  if (m < 3) y--;
-  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
-}
 
 void GithubDashboardActivity::render(RenderLock&&) {
   switch (state) {
@@ -530,12 +442,11 @@ void GithubDashboardActivity::renderMessage(const char* message) const {
   renderer.displayBuffer();
 }
 
-// Small 4x4 contribution-grid glyph for the footer branding (drawIcon assumes
-// portrait orientation, so the landscape dashboard draws its own mark).
+// Small 4x4 contribution-grid glyph for the footer branding.
 namespace {
-void drawGridMark(const GfxRenderer& renderer, int x, int y, int cell, int gap) {
+void drawGithubBrandIcon(const GfxRenderer& renderer, int x, int y) {
   static constexpr uint8_t pattern[4] = {0b1011, 0b0110, 0b1101, 0b1011};  // 1 = filled
-  const int pitch = cell + gap;
+  constexpr int cell = 5, gap = 2, pitch = cell + gap;
   for (int r = 0; r < 4; r++) {
     for (int c = 0; c < 4; c++) {
       if (pattern[r] & (1 << (3 - c))) {
@@ -547,74 +458,6 @@ void drawGridMark(const GfxRenderer& renderer, int x, int y, int cell, int gap) 
   }
 }
 }  // namespace
-
-// 5x7 dot-matrix glyphs for the big stat numbers (digits, '.', 'k').
-// Each glyph is 7 rows of 5 bits, MSB = leftmost column.
-namespace {
-struct BigGlyph {
-  char ch;
-  uint8_t rows[7];
-  uint8_t width;  // in dot columns
-};
-constexpr BigGlyph BIG_GLYPHS[] = {
-    {'0', {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110}, 5},
-    {'1', {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}, 5},
-    {'2', {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111}, 5},
-    {'3', {0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110}, 5},
-    {'4', {0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010}, 5},
-    {'5', {0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110}, 5},
-    {'6', {0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110}, 5},
-    {'7', {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000}, 5},
-    {'8', {0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110}, 5},
-    {'9', {0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100}, 5},
-    {'.', {0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11000, 0b11000}, 2},
-    {'k', {0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010}, 5},
-};
-
-const BigGlyph* findBigGlyph(char c) {
-  for (const auto& g : BIG_GLYPHS) {
-    if (g.ch == c) return &g;
-  }
-  return nullptr;
-}
-
-void formatCompact(uint32_t n, char* out, size_t outLen) {
-  if (n >= 10000) {
-    snprintf(out, outLen, "%uk", (unsigned)(n / 1000));
-  } else if (n >= 1000) {
-    snprintf(out, outLen, "%u.%uk", (unsigned)(n / 1000), (unsigned)((n % 1000) / 100));
-  } else {
-    snprintf(out, outLen, "%u", (unsigned)n);
-  }
-}
-}  // namespace
-
-int GithubDashboardActivity::bigTextWidth(const char* text, int dot) {
-  int w = 0;
-  for (const char* p = text; *p; p++) {
-    const BigGlyph* g = findBigGlyph(*p);
-    w += ((g ? g->width : 5) + 1) * dot;
-  }
-  return w > 0 ? w - dot : 0;  // drop trailing inter-glyph space
-}
-
-void GithubDashboardActivity::drawBigText(int x, int y, const char* text, int dot) const {
-  for (const char* p = text; *p; p++) {
-    const BigGlyph* g = findBigGlyph(*p);
-    if (!g) {
-      x += 6 * dot;
-      continue;
-    }
-    for (int r = 0; r < 7; r++) {
-      for (int c = 0; c < 5; c++) {
-        if (g->rows[r] & (1 << (4 - c))) {
-          renderer.fillRect(x + c * dot, y + r * dot, dot, dot);
-        }
-      }
-    }
-    x += (g->width + 1) * dot;
-  }
-}
 
 void GithubDashboardActivity::renderDashboard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -630,9 +473,9 @@ void GithubDashboardActivity::renderDashboard() const {
 
   // --- Top left: big compact total + caption (TRMNL style) ---
   char hero[16];
-  formatCompact(statTotal, hero, sizeof(hero));
+  DashboardUI::formatCompact(statTotal, hero, sizeof(hero));
   renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);  // accent bar
-  drawBigText(sideMargin, 42, hero, 10);
+  DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
   renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
 
   // --- Top right: 2x2 stat grid ---
@@ -660,7 +503,7 @@ void GithubDashboardActivity::renderDashboard() const {
     const int colX = 430 + (s % 2) * 190;
     const int rowY = 42 + (s / 2) * 78;
     renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);  // accent bar
-    drawBigText(colX, rowY, stats[s].value, 5);
+    DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
     renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
   }
 
@@ -668,7 +511,7 @@ void GithubDashboardActivity::renderDashboard() const {
 
   // --- Heatmap: weeks as columns, Sunday-first rows, GitHub-style grid ---
   if (!cells.empty()) {
-    const int offset = dayOfWeekSunday0(cells.front().date);
+    const int offset = DashboardUI::dayOfWeekSunday0(cells.front().date);
     const int weeks = (offset + static_cast<int>(cells.size()) + 6) / 7;
     constexpr int cellW = 11;
     constexpr int pitchX = 13;
@@ -723,23 +566,8 @@ void GithubDashboardActivity::renderDashboard() const {
   }
 
   // --- Footer bar: GitHub branding, updated time, username + battery ---
-  const int sepY = pageHeight - 54;
-  renderer.fillRect(sideMargin, sepY, pageWidth - 2 * sideMargin, 1);
-  const int footerTextY = sepY + 18;
-
-  drawGridMark(renderer, sideMargin, sepY + 15, 5, 2);  // 26px mini contribution grid
-  renderer.drawText(UI_10_FONT_ID, sideMargin + 38, footerTextY, "GitHub", true, EpdFontFamily::BOLD);
-
-  if (lastUpdated[0] != '\0') {
-    char line[40];
-    snprintf(line, sizeof(line), "%s %s", tr(STR_GITHUB_UPDATED), lastUpdated);
-    renderer.drawCenteredText(UI_10_FONT_ID, footerTextY, line);
-  }
-
-  const int userW = renderer.getTextWidth(UI_10_FONT_ID, SETTINGS.githubUsername);
-  const int battX = pageWidth - sideMargin - metrics.batteryWidth;
-  renderer.drawText(UI_10_FONT_ID, battX - 10 - userW, footerTextY, SETTINGS.githubUsername);
-  GUI.drawBatteryLeft(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
+  DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawGithubBrandIcon, "GitHub",
+                          tr(STR_DASHBOARD_UPDATED), lastUpdated, SETTINGS.githubUsername);
 
   // Full refresh: this frame stays on the panel for the whole sleep hour.
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);

@@ -25,8 +25,10 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/tempest.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
+#include "components/icons/weather.h"
 #include "components/icons/wifi.h"
 #include "fontIds.h"
 
@@ -79,6 +81,10 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return BookmarkIcon;
       case UIIcon::Github:
         return GithubIcon;
+      case UIIcon::Weather:
+        return WeatherIcon;
+      case UIIcon::Tempest:
+        return TempestIcon;
       default:
         return nullptr;
     }

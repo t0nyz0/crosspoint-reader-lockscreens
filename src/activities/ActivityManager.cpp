@@ -18,7 +18,9 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "tempest/TempestDashboardActivity.h"
 #include "util/FullScreenMessageActivity.h"
+#include "weather/WeatherDashboardActivity.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -200,6 +202,14 @@ void ActivityManager::goToGithubDashboard() {
   replaceActivity(std::make_unique<GithubDashboardActivity>(renderer, mappedInput));
 }
 
+void ActivityManager::goToWeatherDashboard() {
+  replaceActivity(std::make_unique<WeatherDashboardActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToTempestDashboard() {
+  replaceActivity(std::make_unique<TempestDashboardActivity>(renderer, mappedInput));
+}
+
 void ActivityManager::goToReader(std::string path) {
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
 }
@@ -226,6 +236,10 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "GithubDashboard") {
       initialMenuItem = HomeMenuItem::GITHUB_DASHBOARD;
+    } else if (activityName == "WeatherDashboard") {
+      initialMenuItem = HomeMenuItem::WEATHER_DASHBOARD;
+    } else if (activityName == "TempestDashboard") {
+      initialMenuItem = HomeMenuItem::TEMPEST_DASHBOARD;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {

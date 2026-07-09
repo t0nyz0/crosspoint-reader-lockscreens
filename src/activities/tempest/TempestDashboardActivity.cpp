@@ -1,0 +1,359 @@
+#include "TempestDashboardActivity.h"
+
+#include <ArduinoJson.h>
+#include <GfxRenderer.h>
+#include <I18n.h>
+#include <Logging.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+#include <cstdio>
+#include <cstring>
+
+#include "CrossPointSettings.h"
+#include "CrossPointState.h"
+#include "DashboardSleep.h"
+#include "MappedInputManager.h"
+#include "SilentRestart.h"
+#include "WifiCredentialStore.h"
+#include "activities/dashboard/DashboardUI.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+namespace {
+constexpr const char* COMPASS[16] = {"N",  "NNE", "NE", "ENE", "E",  "ESE", "SE", "SSE",
+                                     "S",  "SSW", "SW", "WSW", "W",  "WNW", "NW", "NNW"};
+
+// Small weather-vane glyph for the footer branding: a diamond with a stem.
+void drawTempestBrandIcon(const GfxRenderer& renderer, int x, int y) {
+  renderer.drawLine(x + 11, y, x + 3, y + 8, 2, true);
+  renderer.drawLine(x + 11, y, x + 19, y + 8, 2, true);
+  renderer.drawLine(x + 11, y + 22, x + 3, y + 14, 2, true);
+  renderer.drawLine(x + 11, y + 22, x + 19, y + 14, 2, true);
+  renderer.fillRoundedRect(x + 9, y + 9, 5, 5, 2, Color::Black);
+}
+}  // namespace
+
+const char* TempestDashboardActivity::compassDirection(int degrees) {
+  const int idx = ((degrees % 360 + 360) % 360 + 11) * 16 / 360 % 16;
+  return COMPASS[idx];
+}
+
+void TempestDashboardActivity::onEnter() {
+  Activity::onEnter();
+  beginUpdate();
+}
+
+void TempestDashboardActivity::onExit() {
+  Activity::onExit();
+  if (wifiUsed && WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(false);
+    delay(30);
+    silentRestart();
+  }
+}
+
+void TempestDashboardActivity::promptLabel() {
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_TEMPEST_LABEL), SETTINGS.tempestLabel,
+                                              sizeof(SETTINGS.tempestLabel) - 1, InputType::Text),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          const auto& kb = std::get<KeyboardResult>(result.data);
+          strncpy(SETTINGS.tempestLabel, kb.text.c_str(), sizeof(SETTINGS.tempestLabel) - 1);
+          SETTINGS.tempestLabel[sizeof(SETTINGS.tempestLabel) - 1] = '\0';
+          SETTINGS.saveToFile();
+        }
+        if (state == State::Showing) sleepAt = millis() + DISPLAY_GRACE_INTERACTIVE_MS;
+        requestUpdate();
+      });
+}
+
+void TempestDashboardActivity::beginUpdate() {
+  state = State::Connecting;
+  errorMessage = nullptr;
+  sleepAt = 0;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    state = State::Fetching;
+    if (!autoRefresh) requestUpdate();
+    return;
+  }
+
+  wifiUsed = true;
+  if (autoRefresh) {
+    startDirectWifiConnect();
+    return;
+  }
+
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
+                             finish();
+                             return;
+                           }
+                           state = State::Fetching;
+                           requestUpdate();
+                         });
+}
+
+void TempestDashboardActivity::startDirectWifiConnect() {
+  {
+    RenderLock lock(*this);
+    WIFI_STORE.loadFromFile();
+  }
+
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  const WifiCredential* cred = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
+  if (!cred) {
+    LOG_ERR("TMP", "No saved WiFi network for unattended refresh");
+    state = State::Failed;
+    errorMessage = tr(STR_DASHBOARD_WIFI_FAILED);
+    return;
+  }
+
+  LOG_INF("TMP", "Unattended refresh: connecting to %s", cred->ssid.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred->ssid.c_str(), cred->password.empty() ? nullptr : cred->password.c_str());
+  wifiConnectStart = millis();
+}
+
+void TempestDashboardActivity::loop() {
+  switch (state) {
+    case State::Connecting:
+      if (!autoRefresh) return;
+      if (WiFi.status() == WL_CONNECTED) {
+        state = State::Fetching;
+        return;
+      }
+      if (millis() - wifiConnectStart >= WIFI_TIMEOUT_MS) {
+        LOG_ERR("TMP", "Unattended WiFi connect timed out");
+        state = State::Failed;
+        errorMessage = tr(STR_DASHBOARD_WIFI_FAILED);
+        requestUpdateAndWait();
+        goToSleepAndPoll();
+      }
+      return;
+
+    case State::Fetching:
+      if (!autoRefresh) {
+        requestUpdateAndWait();
+      }
+      runFetch();
+      return;
+
+    case State::Showing:
+    case State::Failed:
+      break;
+  }
+
+  if (autoRefresh) {
+    requestUpdateAndWait();
+    goToSleepAndPoll();
+    return;
+  }
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (APP_STATE.activeDashboardMode == CrossPointState::DASHBOARD_TEMPEST) {
+      APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_NONE;
+      APP_STATE.saveToFile();
+    }
+    finish();
+    return;
+  }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    sleepAt = 0;
+    promptLabel();
+    return;
+  }
+  if (state == State::Showing && sleepAt != 0 && millis() >= sleepAt) {
+    goToSleepAndPoll();
+  }
+}
+
+bool TempestDashboardActivity::listenForObservation() {
+  WiFiUDP udp;
+  if (!udp.begin(TEMPEST_UDP_PORT)) {
+    LOG_ERR("TMP", "Failed to bind UDP port %u", TEMPEST_UDP_PORT);
+    return false;
+  }
+
+  const unsigned long start = millis();
+  static char packetBuf[768];
+  bool found = false;
+
+  while (millis() - start < UDP_LISTEN_TIMEOUT_MS) {
+    const int packetSize = udp.parsePacket();
+    if (packetSize <= 0) {
+      delay(50);
+      continue;
+    }
+
+    const int len = udp.read(packetBuf, sizeof(packetBuf) - 1);
+    if (len <= 0) continue;
+    packetBuf[len] = '\0';
+
+    JsonDocument doc;
+    if (deserializeJson(doc, packetBuf) != DeserializationError::Ok) continue;
+    if (strcmp(doc["type"] | "", "obs_st") != 0) continue;
+
+    JsonArrayConst obs = doc["obs"][0];
+    if (obs.isNull() || obs.size() < 17) continue;
+
+    const float windAvgMs = obs[2] | 0.0;
+    const float windGustMs = obs[3] | 0.0;
+    windDirDeg = obs[4] | 0;
+    const float pressureMb = obs[6] | 0.0;
+    const float tempC = obs[7] | 0.0;
+    humidityPct = obs[8] | 0;
+    const float rainMm = obs[12] | 0.0;
+    stationBatteryV = obs[16] | 0.0;
+
+    windAvgMph = windAvgMs * 2.23694f;
+    windGustMph = windGustMs * 2.23694f;
+    pressureInHg = pressureMb * 0.0295300f;
+    rainLastMinIn = rainMm * 0.0393701f;
+    tempF = tempC * 9.0f / 5.0f + 32.0f;
+
+    found = true;
+    break;
+  }
+
+  udp.stop();
+  return found;
+}
+
+void TempestDashboardActivity::runFetch() {
+  DashboardUI::syncClockAndTimezone();
+
+  LOG_INF("TMP", "Listening for Tempest broadcast on UDP %u (up to %lu ms)", TEMPEST_UDP_PORT,
+          UDP_LISTEN_TIMEOUT_MS);
+
+  if (!listenForObservation()) {
+    LOG_ERR("TMP", "No Tempest observation received");
+    state = State::Failed;
+    errorMessage = tr(STR_TEMPEST_NOT_FOUND);
+  } else {
+    DashboardUI::formatUpdatedStamp(lastUpdated, sizeof(lastUpdated));
+    LOG_INF("TMP", "%.1fF, humidity %d%%, wind %.1f mph %s, pressure %.2f inHg", tempF, humidityPct, windAvgMph,
+            compassDirection(windDirDeg), pressureInHg);
+    state = State::Showing;
+  }
+
+  requestUpdateAndWait();
+
+  if (autoRefresh) {
+    goToSleepAndPoll();
+  } else if (state == State::Showing) {
+    sleepAt = millis() + DISPLAY_GRACE_INTERACTIVE_MS;
+  }
+}
+
+void TempestDashboardActivity::goToSleepAndPoll() {
+  APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_TEMPEST;
+  APP_STATE.saveToFile();
+  const uint32_t intervalS = SETTINGS.tempestRefreshMinutes * 60u;
+  LOG_INF("TMP", "Dashboard armed, sleeping for %u s", (unsigned)intervalS);
+  enterDashboardSleep(intervalS);
+}
+
+void TempestDashboardActivity::render(RenderLock&&) {
+  switch (state) {
+    case State::Connecting:
+      renderMessage(tr(STR_TEMPEST_SEARCHING));
+      break;
+    case State::Fetching:
+      renderMessage(tr(STR_TEMPEST_SEARCHING));
+      break;
+    case State::Failed:
+      renderMessage(errorMessage ? errorMessage : tr(STR_TEMPEST_NOT_FOUND));
+      break;
+    case State::Showing:
+      renderDashboard();
+      break;
+  }
+}
+
+void TempestDashboardActivity::renderMessage(const char* message) const {
+  const auto pageHeight = renderer.getScreenHeight();
+  renderer.clearScreen();
+
+  const char* label = SETTINGS.tempestLabel[0] != '\0' ? SETTINGS.tempestLabel : tr(STR_TEMPEST_DASHBOARD);
+  renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 30, label, true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 5, message);
+
+  if (state == State::Failed) {
+    renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 30, tr(STR_TEMPEST_NOT_FOUND_HINT));
+  }
+
+  if (!autoRefresh && state == State::Failed) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
+  renderer.displayBuffer();
+}
+
+void TempestDashboardActivity::renderDashboard() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  const auto origOrientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  constexpr int sideMargin = 40;
+
+  renderer.clearScreen();
+
+  const char* label = SETTINGS.tempestLabel[0] != '\0' ? SETTINGS.tempestLabel : tr(STR_TEMPEST_DASHBOARD);
+
+  // --- Top left: big current temp + station label ---
+  char hero[8];
+  snprintf(hero, sizeof(hero), "%dF", static_cast<int>(tempF + (tempF >= 0 ? 0.5f : -0.5f)));
+  renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
+  DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
+  renderer.drawText(UI_10_FONT_ID, sideMargin, 130, label);
+
+  // --- Top right: 2x2 stat grid ---
+  struct StatEntry {
+    char value[16];
+    const char* label;
+  };
+  StatEntry stats[4];
+  snprintf(stats[0].value, sizeof(stats[0].value), "%d", static_cast<int>(windAvgMph + 0.5f));
+  stats[0].label = tr(STR_TEMPEST_WIND);
+  snprintf(stats[1].value, sizeof(stats[1].value), "%d%%", humidityPct);
+  stats[1].label = tr(STR_TEMPEST_HUMIDITY);
+  snprintf(stats[2].value, sizeof(stats[2].value), "%.2f", pressureInHg);
+  stats[2].label = tr(STR_TEMPEST_PRESSURE);
+  snprintf(stats[3].value, sizeof(stats[3].value), "%.2f", rainLastMinIn);
+  stats[3].label = tr(STR_TEMPEST_RAIN);
+
+  for (int s = 0; s < 4; s++) {
+    const int colX = 430 + (s % 2) * 190;
+    const int rowY = 42 + (s / 2) * 78;
+    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
+    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
+  }
+
+  renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
+
+  // --- Wind detail + station battery, centered in the body area ---
+  char windLine[48];
+  snprintf(windLine, sizeof(windLine), "%d%s, gusting %d mph", static_cast<int>(windAvgMph + 0.5f),
+           compassDirection(windDirDeg), static_cast<int>(windGustMph + 0.5f));
+  renderer.drawCenteredText(UI_12_FONT_ID, 250, windLine);
+
+  char battLine[32];
+  snprintf(battLine, sizeof(battLine), "%s %.2fV", tr(STR_TEMPEST_STATION_BATTERY), stationBatteryV);
+  renderer.drawCenteredText(SMALL_FONT_ID, 290, battLine);
+
+  // --- Footer bar ---
+  DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawTempestBrandIcon, label,
+                          tr(STR_DASHBOARD_UPDATED), lastUpdated, "");
+
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  renderer.setOrientation(origOrientation);
+}
