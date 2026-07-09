@@ -446,25 +446,29 @@ void TempestDashboardActivity::renderDashboard() const {
   // see localWeatherCategory().
   const DashboardUI::WxCategory condition = localWeatherCategory();
   const char* conditionLabel = localWeatherLabel();
-  constexpr int conditionIconX = 260;
-  DashboardUI::drawWeatherIcon(renderer, condition, conditionIconX, 40, 44);
+  constexpr int conditionIconSize = 110;  // fills the gap between the hero and the stat grid
+  constexpr int conditionIconX = 275;
+  constexpr int conditionIconY = 42;
+  DashboardUI::drawWeatherIcon(renderer, condition, conditionIconX, conditionIconY, conditionIconSize);
   const int conditionLabelW = renderer.getTextWidth(UI_10_FONT_ID, conditionLabel);
-  renderer.drawText(UI_10_FONT_ID, conditionIconX + 22 - conditionLabelW / 2, 100, conditionLabel);
+  renderer.drawText(UI_10_FONT_ID, conditionIconX + conditionIconSize / 4 - conditionLabelW / 2, 150, conditionLabel);
 
   // --- Top right: 2x2 stat grid ---
   struct StatEntry {
     char value[16];
     const char* label;
   };
+  // Wind + Gust share the top row (the two wind-speed readings, side by
+  // side); Pressure + Humidity fill the row below.
   StatEntry stats[4];
   snprintf(stats[0].value, sizeof(stats[0].value), "%d", static_cast<int>(windAvgMph + 0.5f));
   stats[0].label = tr(STR_TEMPEST_WIND);
-  snprintf(stats[1].value, sizeof(stats[1].value), "%d%%", humidityPct);
-  stats[1].label = tr(STR_TEMPEST_HUMIDITY);
+  snprintf(stats[1].value, sizeof(stats[1].value), "%d", static_cast<int>(windGustMph + 0.5f));
+  stats[1].label = tr(STR_TEMPEST_GUST);
   snprintf(stats[2].value, sizeof(stats[2].value), "%.2f", pressureInHg);
   stats[2].label = tr(STR_TEMPEST_PRESSURE);
-  snprintf(stats[3].value, sizeof(stats[3].value), "%.2f", rainLastMinIn);
-  stats[3].label = tr(STR_TEMPEST_RAIN);
+  snprintf(stats[3].value, sizeof(stats[3].value), "%d%%", humidityPct);
+  stats[3].label = tr(STR_TEMPEST_HUMIDITY);
 
   for (int s = 0; s < 4; s++) {
     const int colX = 430 + (s % 2) * 190;
@@ -483,17 +487,16 @@ void TempestDashboardActivity::renderDashboard() const {
 
   renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
 
-  // --- Second stat row: more live local readings (dew point, UV, gust,
-  // lightning). Tempest's local broadcast has no forecast -- that only
-  // exists in WeatherFlow's cloud API -- so this fills the space with more
-  // of what the station itself actually reports, same tile style as above.
+  // --- Second stat row: more live local readings. Tempest's local broadcast
+  // has no forecast -- that only exists in WeatherFlow's cloud API -- so this
+  // fills the space with more of what the station itself actually reports.
   StatEntry row2[4];
-  snprintf(row2[0].value, sizeof(row2[0].value), "%dF", static_cast<int>(dewPointF + (dewPointF >= 0 ? 0.5f : -0.5f)));
-  row2[0].label = tr(STR_TEMPEST_DEW_POINT);
-  snprintf(row2[1].value, sizeof(row2[1].value), "%d", static_cast<int>(uvIndex + 0.5f));
-  row2[1].label = tr(STR_TEMPEST_UV_INDEX);
-  snprintf(row2[2].value, sizeof(row2[2].value), "%d", static_cast<int>(windGustMph + 0.5f));
-  row2[2].label = tr(STR_TEMPEST_GUST);
+  snprintf(row2[0].value, sizeof(row2[0].value), "%.2f", rainLastMinIn);
+  row2[0].label = tr(STR_TEMPEST_RAIN);
+  snprintf(row2[1].value, sizeof(row2[1].value), "%dF", static_cast<int>(dewPointF + (dewPointF >= 0 ? 0.5f : -0.5f)));
+  row2[1].label = tr(STR_TEMPEST_DEW_POINT);
+  snprintf(row2[2].value, sizeof(row2[2].value), "%d", static_cast<int>(uvIndex + 0.5f));
+  row2[2].label = tr(STR_TEMPEST_UV_INDEX);
   if (lightningCount > 0) {
     snprintf(row2[3].value, sizeof(row2[3].value), "%d", static_cast<int>(lightningDistMi + 0.5f));
   } else {

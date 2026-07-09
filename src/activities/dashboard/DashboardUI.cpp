@@ -1,6 +1,7 @@
 #include "DashboardUI.h"
 
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
@@ -122,12 +123,21 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
     renderer.drawCenteredText(UI_10_FONT_ID, footerTextY, line);
   }
 
-  const int identityW = identity ? renderer.getTextWidth(UI_10_FONT_ID, identity) : 0;
+  // Battery icon + explicit "NN%" (a bare icon glyph is hard to read at a
+  // glance on e-ink) -- drawBatteryRight puts the icon on the right and the
+  // percentage just to its left, so the identity text only needs to clear
+  // the percentage label, not guess where the icon starts.
   const int battX = pageWidth - sideMargin - metrics.batteryWidth;
+  char pctText[8];
+  snprintf(pctText, sizeof(pctText), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
+  const int pctTextW = renderer.getTextWidth(SMALL_FONT_ID, pctText);
+  const int identityRightEdge = battX - pctTextW - 14;
+
   if (identity && identity[0] != '\0') {
-    renderer.drawText(UI_10_FONT_ID, battX - 10 - identityW, footerTextY, identity);
+    const int identityW = renderer.getTextWidth(UI_10_FONT_ID, identity);
+    renderer.drawText(UI_10_FONT_ID, identityRightEdge - identityW, footerTextY, identity);
   }
-  GUI.drawBatteryLeft(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
+  GUI.drawBatteryRight(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, true);
 }
 
 void syncClockAndTimezone() {
@@ -213,12 +223,36 @@ void drawWeatherIcon(const GfxRenderer& renderer, WxCategory category, int x, in
   const int r = size / 2;
 
   if (category == WxCategory::Clear || category == WxCategory::PartlyCloudy) {
-    // Sun: filled blob + short rays
+    // Sun: filled disc + 8 rays (cardinal + diagonal), all scaled with size
+    // instead of fixed pixel stubs -- otherwise the rays stay hairline-thin
+    // no matter how big the disc gets.
+    const int rayLen = size / 5 > 3 ? size / 5 : 3;
+    const int rayGap = size / 12 > 1 ? size / 12 : 1;
+    const int rayWidth = size / 20 > 1 ? size / 20 : 1;
+    const int cx = x + r / 2;
+    const int cy = y + r / 2;
+
     renderer.fillRoundedRect(x, y, r, r, r / 2, Color::Black);
-    renderer.drawLine(x + r / 2, y - 4, x + r / 2, y - 1);
-    renderer.drawLine(x + r / 2, y + r + 1, x + r / 2, y + r + 4);
-    renderer.drawLine(x - 4, y + r / 2, x - 1, y + r / 2);
-    renderer.drawLine(x + r + 1, y + r / 2, x + r + 4, y + r / 2);
+
+    // Cardinal rays
+    renderer.drawLine(cx, y - rayGap - rayLen, cx, y - rayGap, rayWidth, true);
+    renderer.drawLine(cx, y + r + rayGap, cx, y + r + rayGap + rayLen, rayWidth, true);
+    renderer.drawLine(x - rayGap - rayLen, cy, x - rayGap, cy, rayWidth, true);
+    renderer.drawLine(x + r + rayGap, cy, x + r + rayGap + rayLen, cy, rayWidth, true);
+
+    // Diagonal rays
+    constexpr float kDiag = 0.7071f;  // cos/sin(45 deg)
+    const float innerR = static_cast<float>(r) / 2.0f + rayGap;
+    const float outerR = innerR + rayLen;
+    for (int sx = -1; sx <= 1; sx += 2) {
+      for (int sy = -1; sy <= 1; sy += 2) {
+        const int x1 = cx + static_cast<int>(sx * kDiag * innerR);
+        const int y1 = cy + static_cast<int>(sy * kDiag * innerR);
+        const int x2 = cx + static_cast<int>(sx * kDiag * outerR);
+        const int y2 = cy + static_cast<int>(sy * kDiag * outerR);
+        renderer.drawLine(x1, y1, x2, y2, rayWidth, true);
+      }
+    }
   }
   if (category == WxCategory::Clear) return;
 
