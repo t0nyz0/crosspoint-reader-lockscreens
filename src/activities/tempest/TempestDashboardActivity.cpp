@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -239,6 +240,8 @@ bool TempestDashboardActivity::listenForObservation() {
     const float solarRaw = obs[11] | 0.0f;
     const float rainMm = obs[12] | 0.0f;
     const float precipTypeRaw = obs[13] | 0.0f;
+    const float lightningDistKm = obs[14] | 0.0f;
+    const float lightningCountRaw = obs[15] | 0.0f;
     stationBatteryV = obs[16] | 0.0f;
 
     windDirDeg = static_cast<int>(windDirRaw + 0.5f);
@@ -246,11 +249,24 @@ bool TempestDashboardActivity::listenForObservation() {
     uvIndex = uvRaw;
     solarRadiationWm2 = solarRaw;
     precipType = static_cast<int>(precipTypeRaw + 0.5f);
+    lightningCount = static_cast<int>(lightningCountRaw + 0.5f);
+    lightningDistMi = lightningDistKm * 0.621371f;
     windAvgMph = windAvgMs * 2.23694f;
     windGustMph = windGustMs * 2.23694f;
     pressureInHg = pressureMb * 0.0295300f;
     rainLastMinIn = rainMm * 0.0393701f;
     tempF = tempC * 9.0f / 5.0f + 32.0f;
+
+    // Dew point via the Magnus-Tetens approximation, computed in Celsius
+    // (matches the wire units) then converted to F for display.
+    const float rh = humidityRaw / 100.0f;
+    if (rh > 0.0f) {
+      const float alpha = (17.27f * tempC) / (237.7f + tempC) + logf(rh);
+      const float dewC = (237.7f * alpha) / (17.27f - alpha);
+      dewPointF = dewC * 9.0f / 5.0f + 32.0f;
+    } else {
+      dewPointF = tempF;
+    }
 
     found = true;
     break;
@@ -393,18 +409,37 @@ void TempestDashboardActivity::renderDashboard() const {
 
   renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
 
-  // --- Gust + station battery, centered in the body area ---
-  char windLine[32];
-  snprintf(windLine, sizeof(windLine), "%s %d mph", tr(STR_TEMPEST_GUSTING), static_cast<int>(windGustMph + 0.5f));
-  renderer.drawCenteredText(UI_12_FONT_ID, 250, windLine);
+  // --- Second stat row: more live local readings (dew point, UV, gust,
+  // lightning). Tempest's local broadcast has no forecast -- that only
+  // exists in WeatherFlow's cloud API -- so this fills the space with more
+  // of what the station itself actually reports, same tile style as above.
+  StatEntry row2[4];
+  snprintf(row2[0].value, sizeof(row2[0].value), "%dF", static_cast<int>(dewPointF + (dewPointF >= 0 ? 0.5f : -0.5f)));
+  row2[0].label = tr(STR_TEMPEST_DEW_POINT);
+  snprintf(row2[1].value, sizeof(row2[1].value), "%d", static_cast<int>(uvIndex + 0.5f));
+  row2[1].label = tr(STR_TEMPEST_UV_INDEX);
+  snprintf(row2[2].value, sizeof(row2[2].value), "%d", static_cast<int>(windGustMph + 0.5f));
+  row2[2].label = tr(STR_TEMPEST_GUST);
+  if (lightningCount > 0) {
+    snprintf(row2[3].value, sizeof(row2[3].value), "%d", static_cast<int>(lightningDistMi + 0.5f));
+  } else {
+    snprintf(row2[3].value, sizeof(row2[3].value), "-");
+  }
+  row2[3].label = tr(STR_TEMPEST_LIGHTNING);
 
-  char battLine[32];
-  snprintf(battLine, sizeof(battLine), "%s %.2fV", tr(STR_TEMPEST_STATION_BATTERY), stationBatteryV);
-  renderer.drawCenteredText(SMALL_FONT_ID, 290, battLine);
+  for (int s = 0; s < 4; s++) {
+    const int colX = sideMargin + s * 180;
+    constexpr int rowY = 226;
+    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, colX, rowY, row2[s].value, 5);
+    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, row2[s].label);
+  }
 
-  // --- Footer bar ---
+  // --- Footer bar: station battery takes the "identity" slot ---
+  char battLine[24];
+  snprintf(battLine, sizeof(battLine), "%.2fV", stationBatteryV);
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawTempestBrandIcon, label,
-                          tr(STR_DASHBOARD_UPDATED), lastUpdated, "");
+                          tr(STR_DASHBOARD_UPDATED), lastUpdated, battLine);
 
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   renderer.setOrientation(origOrientation);

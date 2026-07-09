@@ -48,6 +48,9 @@ class TempestDashboardActivity final : public Activity {
   float pressureInHg = 0;
   float rainLastMinIn = 0;
   float stationBatteryV = 0;
+  float dewPointF = 0;
+  int lightningCount = 0;      // strikes in the report interval (0 = none detected)
+  float lightningDistMi = 0;   // average distance to strikes, if any
   // Not shown directly; feed the local Clear/Cloudy/etc. heuristic (Tempest's
   // local broadcast has no interpreted condition, unlike a cloud weather API).
   float uvIndex = 0;
