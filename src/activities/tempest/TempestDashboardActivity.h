@@ -44,18 +44,24 @@ class TempestDashboardActivity final : public Activity {
   int humidityPct = 0;
   float windAvgMph = 0;
   float windGustMph = 0;
+  float windLullMph = 0;
   int windDirDeg = 0;
   float pressureInHg = 0;
   float rainLastMinIn = 0;
   float stationBatteryV = 0;
   float dewPointF = 0;
+  float feelsLikeF = 0;
+  float illuminanceLux = 0;
   int lightningCount = 0;      // strikes in the report interval (0 = none detected)
   float lightningDistMi = 0;   // average distance to strikes, if any
-  // Not shown directly; feed the local Clear/Cloudy/etc. heuristic (Tempest's
-  // local broadcast has no interpreted condition, unlike a cloud weather API).
   float uvIndex = 0;
   float solarRadiationWm2 = 0;
   int precipType = 0;  // 0 = none, 1 = rain, 2 = hail, 3 = rain+hail
+
+  // ~3-hour pressure tendency, computed against a reference reading
+  // persisted in CrossPointState (see runFetch()).
+  bool pressureTrendValid = false;
+  float pressureTrendDeltaInHg = 0;
 
   char lastUpdated[24] = "";
 
@@ -64,6 +70,7 @@ class TempestDashboardActivity final : public Activity {
   void startDirectWifiConnect();
   void runFetch();
   bool listenForObservation();
+  void computePressureTrend();
   void goToSleepAndPoll();
 
   void renderDashboard() const;

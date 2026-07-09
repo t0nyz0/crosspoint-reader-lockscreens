@@ -79,6 +79,8 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["showBootScreen"] = s.showBootScreen;
   doc["activeDashboardMode"] = s.activeDashboardMode;
+  doc["tempestTrendRefPressureInHg"] = s.tempestTrendRefPressureInHg;
+  doc["tempestTrendRefEpoch"] = s.tempestTrendRefEpoch;
 
   String json;
   serializeJson(doc, json);
@@ -115,6 +117,8 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   s.showBootScreen = doc["showBootScreen"] | true;
   s.activeDashboardMode = doc["activeDashboardMode"] | static_cast<uint8_t>(0);
+  s.tempestTrendRefPressureInHg = doc["tempestTrendRefPressureInHg"] | 0.0f;
+  s.tempestTrendRefEpoch = doc["tempestTrendRefEpoch"] | static_cast<uint32_t>(0);
   return true;
 }
 

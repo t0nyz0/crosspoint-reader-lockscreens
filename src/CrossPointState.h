@@ -29,6 +29,13 @@ class CrossPointState {
   enum ActiveDashboard : uint8_t { DASHBOARD_NONE = 0, DASHBOARD_GITHUB = 1, DASHBOARD_WEATHER = 2, DASHBOARD_TEMPEST = 3 };
   uint8_t activeDashboardMode = DASHBOARD_NONE;
 
+  // Reference point for the Tempest dashboard's ~3-hour pressure tendency
+  // (classic "rising/falling/steady" reading). Refreshed only once the
+  // reference gets old, so short polling intervals still measure a
+  // meaningful window instead of a noisy few-minute delta.
+  float tempestTrendRefPressureInHg = 0;
+  uint32_t tempestTrendRefEpoch = 0;
+
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -230,12 +231,14 @@ bool TempestDashboardActivity::listenForObservation() {
     // (e.g. 58.26) even though they're conceptually whole numbers -- an int
     // default there silently returns 0 instead of coercing. Round afterward
     // for the fields that are logically integers.
+    const float windLullMs = obs[1] | 0.0f;
     const float windAvgMs = obs[2] | 0.0f;
     const float windGustMs = obs[3] | 0.0f;
     const float windDirRaw = obs[4] | 0.0f;
     const float pressureMb = obs[6] | 0.0f;
     const float tempC = obs[7] | 0.0f;
     const float humidityRaw = obs[8] | 0.0f;
+    const float illuminanceRaw = obs[9] | 0.0f;
     const float uvRaw = obs[10] | 0.0f;
     const float solarRaw = obs[11] | 0.0f;
     const float rainMm = obs[12] | 0.0f;
@@ -246,11 +249,13 @@ bool TempestDashboardActivity::listenForObservation() {
 
     windDirDeg = static_cast<int>(windDirRaw + 0.5f);
     humidityPct = static_cast<int>(humidityRaw + 0.5f);
+    illuminanceLux = illuminanceRaw;
     uvIndex = uvRaw;
     solarRadiationWm2 = solarRaw;
     precipType = static_cast<int>(precipTypeRaw + 0.5f);
     lightningCount = static_cast<int>(lightningCountRaw + 0.5f);
     lightningDistMi = lightningDistKm * 0.621371f;
+    windLullMph = windLullMs * 2.23694f;
     windAvgMph = windAvgMs * 2.23694f;
     windGustMph = windGustMs * 2.23694f;
     pressureInHg = pressureMb * 0.0295300f;
@@ -268,12 +273,70 @@ bool TempestDashboardActivity::listenForObservation() {
       dewPointF = tempF;
     }
 
+    // Apparent temperature: NWS wind chill below 50F with wind, heat index
+    // above 80F, otherwise the same as the actual reading.
+    if (tempF <= 50.0f && windAvgMph >= 3.0f) {
+      const float v016 = powf(windAvgMph, 0.16f);
+      feelsLikeF = 35.74f + 0.6215f * tempF - 35.75f * v016 + 0.4275f * tempF * v016;
+    } else if (tempF >= 80.0f) {
+      const float T = tempF;
+      const float RH = humidityRaw;
+      float hi = 0.5f * (T + 61.0f + (T - 68.0f) * 1.2f + RH * 0.094f);
+      if ((hi + T) / 2.0f >= 80.0f) {
+        hi = -42.379f + 2.04901523f * T + 10.14333127f * RH - 0.22475541f * T * RH - 0.00683783f * T * T -
+             0.05481717f * RH * RH + 0.00122874f * T * T * RH + 0.00085282f * T * RH * RH -
+             0.00000199f * T * T * RH * RH;
+        if (RH < 13.0f && T <= 112.0f) {
+          hi -= ((13.0f - RH) / 4.0f) * sqrtf((17.0f - fabsf(T - 95.0f)) / 17.0f);
+        } else if (RH > 85.0f && T <= 87.0f) {
+          hi += ((RH - 85.0f) / 10.0f) * ((87.0f - T) / 5.0f);
+        }
+      }
+      feelsLikeF = hi;
+    } else {
+      feelsLikeF = tempF;
+    }
+
     found = true;
     break;
   }
 
   udp.stop();
   return found;
+}
+
+// Classic "rising/falling/steady" pressure tendency, tracked against a
+// reference reading persisted across sleep cycles in CrossPointState. The
+// reference only refreshes every ~3 hours (the standard meteorological
+// tendency window), so a short poll interval still measures a meaningful
+// span instead of a noisy few-minute delta.
+void TempestDashboardActivity::computePressureTrend() {
+  constexpr uint32_t TREND_MIN_WINDOW_S = 30 * 60;
+  constexpr uint32_t TREND_RESET_WINDOW_S = 3 * 60 * 60;
+
+  pressureTrendValid = false;
+  pressureTrendDeltaInHg = 0;
+
+  const time_t now = time(nullptr);
+  if (now <= 1735689600) return;  // clock not synced; don't build a trend off a bogus timestamp
+
+  if (APP_STATE.tempestTrendRefEpoch == 0 || now <= static_cast<time_t>(APP_STATE.tempestTrendRefEpoch)) {
+    APP_STATE.tempestTrendRefPressureInHg = pressureInHg;
+    APP_STATE.tempestTrendRefEpoch = static_cast<uint32_t>(now);
+    APP_STATE.saveToFile();
+    return;
+  }
+
+  const uint32_t age = static_cast<uint32_t>(now - static_cast<time_t>(APP_STATE.tempestTrendRefEpoch));
+  if (age >= TREND_MIN_WINDOW_S) {
+    pressureTrendValid = true;
+    pressureTrendDeltaInHg = pressureInHg - APP_STATE.tempestTrendRefPressureInHg;
+  }
+  if (age >= TREND_RESET_WINDOW_S) {
+    APP_STATE.tempestTrendRefPressureInHg = pressureInHg;
+    APP_STATE.tempestTrendRefEpoch = static_cast<uint32_t>(now);
+    APP_STATE.saveToFile();
+  }
 }
 
 void TempestDashboardActivity::runFetch() {
@@ -287,6 +350,7 @@ void TempestDashboardActivity::runFetch() {
     state = State::Failed;
     errorMessage = tr(STR_TEMPEST_NOT_FOUND);
   } else {
+    computePressureTrend();
     DashboardUI::formatUpdatedStamp(lastUpdated, sizeof(lastUpdated));
     LOG_INF("TMP", "%.1fF, humidity %d%%, wind %.1f mph %s, pressure %.2f inHg", tempF, humidityPct, windAvgMph,
             DashboardUI::compassDirection(windDirDeg), pressureInHg);
@@ -366,6 +430,16 @@ void TempestDashboardActivity::renderDashboard() const {
   DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
   renderer.drawText(UI_10_FONT_ID, sideMargin, 130, label);
 
+  // Apparent temperature, only when it meaningfully differs from the actual
+  // reading (heat index / wind chill both collapse to the actual temp
+  // otherwise, so there's nothing worth stating).
+  if (fabsf(feelsLikeF - tempF) >= 2.0f) {
+    char feelsLine[24];
+    snprintf(feelsLine, sizeof(feelsLine), "%s %dF", tr(STR_TEMPEST_FEELS_LIKE),
+             static_cast<int>(feelsLikeF + (feelsLikeF >= 0 ? 0.5f : -0.5f)));
+    renderer.drawText(SMALL_FONT_ID, sideMargin, 150, feelsLine);
+  }
+
   // --- Condition icon + label, between the hero and the stat grid ---
   // Tempest's local broadcast has no interpreted sky condition (unlike a
   // cloud weather API), so this is a best-effort local approximation --
@@ -433,6 +507,39 @@ void TempestDashboardActivity::renderDashboard() const {
     renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
     DashboardUI::drawBigText(renderer, colX, rowY, row2[s].value, 5);
     renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, row2[s].label);
+  }
+
+  // --- Third stat row: illuminance, wind lull, solar radiation, and the
+  // ~3-hour pressure tendency -- again all local, zero extra network calls.
+  StatEntry row3[4];
+  DashboardUI::formatCompact(static_cast<uint32_t>(illuminanceLux + 0.5f), row3[0].value, sizeof(row3[0].value));
+  row3[0].label = tr(STR_TEMPEST_ILLUMINANCE);
+  snprintf(row3[1].value, sizeof(row3[1].value), "%d", static_cast<int>(windLullMph + 0.5f));
+  row3[1].label = tr(STR_TEMPEST_WIND_LULL);
+  DashboardUI::formatCompact(static_cast<uint32_t>(solarRadiationWm2 + 0.5f), row3[2].value, sizeof(row3[2].value));
+  row3[2].label = tr(STR_TEMPEST_SOLAR_RAD);
+  const char* trendLabelText;
+  if (!pressureTrendValid) {
+    snprintf(row3[3].value, sizeof(row3[3].value), "-");
+    trendLabelText = tr(STR_TEMPEST_PRESSURE_TREND);
+  } else if (pressureTrendDeltaInHg > 0.03f) {
+    snprintf(row3[3].value, sizeof(row3[3].value), "%.2f", pressureTrendDeltaInHg);
+    trendLabelText = tr(STR_TEMPEST_TREND_RISING);
+  } else if (pressureTrendDeltaInHg < -0.03f) {
+    snprintf(row3[3].value, sizeof(row3[3].value), "-%.2f", -pressureTrendDeltaInHg);
+    trendLabelText = tr(STR_TEMPEST_TREND_FALLING);
+  } else {
+    snprintf(row3[3].value, sizeof(row3[3].value), "%.2f", pressureTrendDeltaInHg);
+    trendLabelText = tr(STR_TEMPEST_TREND_STEADY);
+  }
+  row3[3].label = trendLabelText;
+
+  for (int s = 0; s < 4; s++) {
+    const int colX = sideMargin + s * 180;
+    constexpr int rowY = 304;
+    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, colX, rowY, row3[s].value, 5);
+    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, row3[s].label);
   }
 
   // --- Footer bar: station battery takes the "identity" slot ---
