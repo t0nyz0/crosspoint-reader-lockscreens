@@ -76,6 +76,7 @@ class GithubDashboardActivity final : public Activity {
   void computeStats();
   bool cellContributed(size_t i, int offset) const;
   static void syncSystemClock();
+  static void autoDetectTimezone();
   void captureUpdateTime();
 
   void renderDashboard() const;

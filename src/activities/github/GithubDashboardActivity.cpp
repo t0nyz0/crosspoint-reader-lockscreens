@@ -227,6 +227,32 @@ void GithubDashboardActivity::syncSystemClock() {
   LOG_ERR("GH", "SNTP sync timed out");
 }
 
+// Detect the local UTC offset from the connection's IP and persist it to the
+// clock settings, so the "Updated" stamp (and the reader clock features) show
+// local time without manual setup. Only runs while the offset is still the
+// UTC+0 default; a manually configured offset is never overridden.
+void GithubDashboardActivity::autoDetectTimezone() {
+  if (SETTINGS.clockUtcOffsetQ != 48) return;
+
+  std::string body;
+  if (!HttpDownloader::fetchUrl("https://worldtimeapi.org/api/ip", body)) {
+    LOG_ERR("GH", "Timezone lookup failed");
+    return;
+  }
+  const size_t p = body.find("\"utc_offset\":\"");
+  if (p == std::string::npos || p + 20 > body.size()) return;
+  const char* s = body.c_str() + p + 14;  // e.g. "-07:00"
+  if ((s[0] != '+' && s[0] != '-') || !isdigit(static_cast<unsigned char>(s[1]))) return;
+  const int sign = s[0] == '-' ? -1 : 1;
+  const int hours = atoi(s + 1);
+  const int minutes = atoi(s + 4);
+  if (hours > 14 || minutes > 59) return;
+  const int quarters = sign * (hours * 4 + minutes / 15);
+  SETTINGS.clockUtcOffsetQ = static_cast<uint8_t>(48 + quarters);
+  SETTINGS.saveToFile();
+  LOG_INF("GH", "Timezone auto-detected: UTC%c%02d:%02d", s[0], hours, minutes);
+}
+
 void GithubDashboardActivity::captureUpdateTime() {
   time_t now = time(nullptr);
   if (now <= 1735689600) {
@@ -249,6 +275,7 @@ void GithubDashboardActivity::runFetch() {
   countsFound = false;
 
   syncSystemClock();
+  autoDetectTimezone();
 
   char url[128];
   snprintf(url, sizeof(url), "https://github.com/users/%s/contributions", SETTINGS.githubUsername);
@@ -621,9 +648,9 @@ void GithubDashboardActivity::renderDashboard() const {
     const int y0 = 248;
 
     // Weekday labels like GitHub (rows are Sunday-first)
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 1 * pitchY + 2, "Mon");
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 3 * pitchY + 2, "Wed");
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 5 * pitchY + 2, "Fri");
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 1 * pitchY - 1, "Mon");
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 3 * pitchY - 1, "Wed");
+    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 5 * pitchY - 1, "Fri");
 
     // Month labels above the columns where a new month starts on a week boundary
     int lastLabelCol = -100;
@@ -648,9 +675,7 @@ void GithubDashboardActivity::renderDashboard() const {
       const int y = y0 + (slot % 7) * pitchY;
       switch (cells[i].level) {
         case 0:
-          // faint dot so the grid still reads as a calendar
-          renderer.fillRect(x + cellW / 2, y + cellH / 2, 2, 2);
-          break;
+          break;  // blank — dots for every empty day read as noise on e-ink
         case 1:
           renderer.drawRoundedRect(x, y, cellW, cellH, 1, 2, true);
           break;
