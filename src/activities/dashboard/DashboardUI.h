@@ -45,4 +45,16 @@ void formatUpdatedStamp(char* buf, size_t bufLen);
 int dayOfWeekSunday0(const char* isoDate);
 extern const char* const DAY_ABBREV[7];  // "Sun".."Sat", indexed by dayOfWeekSunday0()
 
+// Broad weather condition, drawn as a simple primitive-based icon (no bitmap
+// assets). Shared so any dashboard can show a "Clear"/"Rain"/etc. glyph,
+// whether it derives the category from a provider's condition code (Weather)
+// or a local heuristic (Tempest).
+enum class WxCategory { Clear, PartlyCloudy, Cloudy, Fog, Drizzle, Rain, Snow, Storm };
+void drawWeatherIcon(const GfxRenderer& renderer, WxCategory category, int x, int y, int size);
+
+// Small circular dial with a needle pointing toward windDegrees (0 = North,
+// clockwise), plus the compass label ("NW" etc.) printed under it.
+void drawWindDial(const GfxRenderer& renderer, int cx, int cy, int radius, int windDegrees);
+const char* compassDirection(int degrees);
+
 }  // namespace DashboardUI

@@ -7,6 +7,7 @@
 #include <esp_sntp.h>
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -196,6 +197,77 @@ void formatUpdatedStamp(char* buf, size_t bufLen) {
   if (hour12 == 0) hour12 = 12;
   snprintf(buf, bufLen, "%s %d %d:%02d %s", MONTH_ABBREV[ti.tm_mon], ti.tm_mday, hour12, ti.tm_min,
            ti.tm_hour < 12 ? "AM" : "PM");
+}
+
+namespace {
+constexpr const char* COMPASS[16] = {"N",  "NNE", "NE", "ENE", "E",  "ESE", "SE", "SSE",
+                                     "S",  "SSW", "SW", "WSW", "W",  "WNW", "NW", "NNW"};
+}  // namespace
+
+const char* compassDirection(int degrees) {
+  const int idx = ((degrees % 360 + 360) % 360 + 11) * 16 / 360 % 16;
+  return COMPASS[idx];
+}
+
+void drawWeatherIcon(const GfxRenderer& renderer, WxCategory category, int x, int y, int size) {
+  const int r = size / 2;
+
+  if (category == WxCategory::Clear || category == WxCategory::PartlyCloudy) {
+    // Sun: filled blob + short rays
+    renderer.fillRoundedRect(x, y, r, r, r / 2, Color::Black);
+    renderer.drawLine(x + r / 2, y - 4, x + r / 2, y - 1);
+    renderer.drawLine(x + r / 2, y + r + 1, x + r / 2, y + r + 4);
+    renderer.drawLine(x - 4, y + r / 2, x - 1, y + r / 2);
+    renderer.drawLine(x + r + 1, y + r / 2, x + r + 4, y + r / 2);
+  }
+  if (category == WxCategory::Clear) return;
+
+  // Cloud body for everything else (partly-cloudy layers it under the sun)
+  const int cx = category == WxCategory::PartlyCloudy ? x + r / 2 : x;
+  const int cy = category == WxCategory::PartlyCloudy ? y + r / 2 : y;
+  const int cw = size;
+  const int ch = size * 2 / 3;
+  renderer.fillRoundedRect(cx, cy, cw, ch, ch / 2, Color::Black);
+
+  switch (category) {
+    case WxCategory::Rain:
+    case WxCategory::Drizzle:
+      for (int i = 0; i < 3; i++) {
+        const int dx = cx + 4 + i * (cw - 8) / 2;
+        renderer.drawLine(dx, cy + ch + 2, dx - 2, cy + ch + 8, 2, true);
+      }
+      break;
+    case WxCategory::Snow:
+      for (int i = 0; i < 3; i++) {
+        const int dx = cx + 4 + i * (cw - 8) / 2;
+        renderer.fillRect(dx - 1, cy + ch + 3, 3, 3);
+      }
+      break;
+    case WxCategory::Storm:
+      renderer.drawLine(cx + cw / 2 + 2, cy + ch, cx + cw / 2 - 3, cy + ch + 5, 2, true);
+      renderer.drawLine(cx + cw / 2 - 3, cy + ch + 5, cx + cw / 2 + 1, cy + ch + 5, 2, true);
+      renderer.drawLine(cx + cw / 2 + 1, cy + ch + 5, cx + cw / 2 - 4, cy + ch + 10, 2, true);
+      break;
+    case WxCategory::Fog:
+      for (int i = 0; i < 3; i++) {
+        renderer.fillRect(cx, cy + ch + 2 + i * 4, cw, 2);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void drawWindDial(const GfxRenderer& renderer, int cx, int cy, int radius, int windDegrees) {
+  // Outline circle approximated via a fully-rounded square bounding box.
+  renderer.drawRoundedRect(cx - radius, cy - radius, radius * 2, radius * 2, 1, radius, true);
+
+  // Needle: 0 deg = straight up (North), rotates clockwise with wind direction.
+  const float rad = static_cast<float>(windDegrees) * 3.14159265f / 180.0f;
+  const int tipX = cx + static_cast<int>(std::round(std::sin(rad) * (radius - 3)));
+  const int tipY = cy - static_cast<int>(std::round(std::cos(rad) * (radius - 3)));
+  renderer.drawLine(cx, cy, tipX, tipY, 2, true);
+  renderer.fillRoundedRect(cx - 2, cy - 2, 4, 4, 2, Color::Black);
 }
 
 }  // namespace DashboardUI

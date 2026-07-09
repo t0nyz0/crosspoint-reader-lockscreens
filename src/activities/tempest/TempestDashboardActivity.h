@@ -2,6 +2,7 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "activities/dashboard/DashboardUI.h"
 
 // Local WeatherFlow Tempest station dashboard. Listens for the station's
 // broadcast UDP packets on the home WiFi network (no cloud API, no token,
@@ -47,6 +48,11 @@ class TempestDashboardActivity final : public Activity {
   float pressureInHg = 0;
   float rainLastMinIn = 0;
   float stationBatteryV = 0;
+  // Not shown directly; feed the local Clear/Cloudy/etc. heuristic (Tempest's
+  // local broadcast has no interpreted condition, unlike a cloud weather API).
+  float uvIndex = 0;
+  float solarRadiationWm2 = 0;
+  int precipType = 0;  // 0 = none, 1 = rain, 2 = hail, 3 = rain+hail
 
   char lastUpdated[24] = "";
 
@@ -60,5 +66,6 @@ class TempestDashboardActivity final : public Activity {
   void renderDashboard() const;
   void renderMessage(const char* message) const;
 
-  static const char* compassDirection(int degrees);
+  DashboardUI::WxCategory localWeatherCategory() const;
+  const char* localWeatherLabel() const;
 };

@@ -23,9 +23,6 @@
 #include "fontIds.h"
 
 namespace {
-constexpr const char* COMPASS[16] = {"N",  "NNE", "NE", "ENE", "E",  "ESE", "SE", "SSE",
-                                     "S",  "SSW", "SW", "WSW", "W",  "WNW", "NW", "NNW"};
-
 // Small weather-vane glyph for the footer branding: a diamond with a stem.
 void drawTempestBrandIcon(const GfxRenderer& renderer, int x, int y) {
   renderer.drawLine(x + 11, y, x + 3, y + 8, 2, true);
@@ -36,9 +33,33 @@ void drawTempestBrandIcon(const GfxRenderer& renderer, int x, int y) {
 }
 }  // namespace
 
-const char* TempestDashboardActivity::compassDirection(int degrees) {
-  const int idx = ((degrees % 360 + 360) % 360 + 11) * 16 / 360 % 16;
-  return COMPASS[idx];
+// Tempest's local UDP broadcast has no interpreted sky condition (that's only
+// in WeatherFlow's cloud API, which we deliberately avoid needing). This is a
+// best-effort local approximation from precip type + UV + solar radiation --
+// it can't distinguish clear-vs-cloudy skies at night, so it defaults to
+// Clear after dark rather than guessing further.
+DashboardUI::WxCategory TempestDashboardActivity::localWeatherCategory() const {
+  if (precipType == 2) return DashboardUI::WxCategory::Snow;  // hail
+  if (precipType != 0) return DashboardUI::WxCategory::Rain;  // rain or rain+hail
+  if (solarRadiationWm2 < 3 && uvIndex < 0.3f) return DashboardUI::WxCategory::Clear;  // likely night
+  if (uvIndex >= 3.0f && solarRadiationWm2 >= 400) return DashboardUI::WxCategory::Clear;
+  if (solarRadiationWm2 >= 120) return DashboardUI::WxCategory::PartlyCloudy;
+  return DashboardUI::WxCategory::Cloudy;
+}
+
+const char* TempestDashboardActivity::localWeatherLabel() const {
+  switch (localWeatherCategory()) {
+    case DashboardUI::WxCategory::PartlyCloudy:
+      return tr(STR_TEMPEST_WX_PARTLY_CLOUDY);
+    case DashboardUI::WxCategory::Cloudy:
+      return tr(STR_TEMPEST_WX_CLOUDY);
+    case DashboardUI::WxCategory::Rain:
+      return tr(STR_TEMPEST_WX_RAIN);
+    case DashboardUI::WxCategory::Snow:
+      return tr(STR_TEMPEST_WX_SNOW);
+    default:
+      return tr(STR_TEMPEST_WX_CLEAR);
+  }
 }
 
 void TempestDashboardActivity::onEnter() {
@@ -202,15 +223,29 @@ bool TempestDashboardActivity::listenForObservation() {
     JsonArrayConst obs = doc["obs"][0];
     if (obs.isNull() || obs.size() < 17) continue;
 
-    const float windAvgMs = obs[2] | 0.0;
-    const float windGustMs = obs[3] | 0.0;
-    windDirDeg = obs[4] | 0;
-    const float pressureMb = obs[6] | 0.0;
-    const float tempC = obs[7] | 0.0;
-    humidityPct = obs[8] | 0;
-    const float rainMm = obs[12] | 0.0;
-    stationBatteryV = obs[16] | 0.0;
+    // Read every field via a float default: ArduinoJson's `| default` picks
+    // the fallback whenever the stored JSON type doesn't match the default's
+    // type, and the wire format encodes wind direction/humidity as floats
+    // (e.g. 58.26) even though they're conceptually whole numbers -- an int
+    // default there silently returns 0 instead of coercing. Round afterward
+    // for the fields that are logically integers.
+    const float windAvgMs = obs[2] | 0.0f;
+    const float windGustMs = obs[3] | 0.0f;
+    const float windDirRaw = obs[4] | 0.0f;
+    const float pressureMb = obs[6] | 0.0f;
+    const float tempC = obs[7] | 0.0f;
+    const float humidityRaw = obs[8] | 0.0f;
+    const float uvRaw = obs[10] | 0.0f;
+    const float solarRaw = obs[11] | 0.0f;
+    const float rainMm = obs[12] | 0.0f;
+    const float precipTypeRaw = obs[13] | 0.0f;
+    stationBatteryV = obs[16] | 0.0f;
 
+    windDirDeg = static_cast<int>(windDirRaw + 0.5f);
+    humidityPct = static_cast<int>(humidityRaw + 0.5f);
+    uvIndex = uvRaw;
+    solarRadiationWm2 = solarRaw;
+    precipType = static_cast<int>(precipTypeRaw + 0.5f);
     windAvgMph = windAvgMs * 2.23694f;
     windGustMph = windGustMs * 2.23694f;
     pressureInHg = pressureMb * 0.0295300f;
@@ -238,7 +273,7 @@ void TempestDashboardActivity::runFetch() {
   } else {
     DashboardUI::formatUpdatedStamp(lastUpdated, sizeof(lastUpdated));
     LOG_INF("TMP", "%.1fF, humidity %d%%, wind %.1f mph %s, pressure %.2f inHg", tempF, humidityPct, windAvgMph,
-            compassDirection(windDirDeg), pressureInHg);
+            DashboardUI::compassDirection(windDirDeg), pressureInHg);
     state = State::Showing;
   }
 
@@ -315,6 +350,17 @@ void TempestDashboardActivity::renderDashboard() const {
   DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
   renderer.drawText(UI_10_FONT_ID, sideMargin, 130, label);
 
+  // --- Condition icon + label, between the hero and the stat grid ---
+  // Tempest's local broadcast has no interpreted sky condition (unlike a
+  // cloud weather API), so this is a best-effort local approximation --
+  // see localWeatherCategory().
+  const DashboardUI::WxCategory condition = localWeatherCategory();
+  const char* conditionLabel = localWeatherLabel();
+  constexpr int conditionIconX = 260;
+  DashboardUI::drawWeatherIcon(renderer, condition, conditionIconX, 40, 44);
+  const int conditionLabelW = renderer.getTextWidth(UI_10_FONT_ID, conditionLabel);
+  renderer.drawText(UI_10_FONT_ID, conditionIconX + 22 - conditionLabelW / 2, 100, conditionLabel);
+
   // --- Top right: 2x2 stat grid ---
   struct StatEntry {
     char value[16];
@@ -336,14 +382,20 @@ void TempestDashboardActivity::renderDashboard() const {
     renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
     DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
     renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
+    if (s == 0) {
+      // Wind direction dial beside the speed digits, clear of the next column.
+      DashboardUI::drawWindDial(renderer, colX + 95, rowY + 18, 16, windDirDeg);
+      const char* dir = DashboardUI::compassDirection(windDirDeg);
+      const int dirW = renderer.getTextWidth(SMALL_FONT_ID, dir);
+      renderer.drawText(SMALL_FONT_ID, colX + 95 - dirW / 2, rowY + 40, dir);
+    }
   }
 
   renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
 
-  // --- Wind detail + station battery, centered in the body area ---
-  char windLine[48];
-  snprintf(windLine, sizeof(windLine), "%d%s, gusting %d mph", static_cast<int>(windAvgMph + 0.5f),
-           compassDirection(windDirDeg), static_cast<int>(windGustMph + 0.5f));
+  // --- Gust + station battery, centered in the body area ---
+  char windLine[32];
+  snprintf(windLine, sizeof(windLine), "%s %d mph", tr(STR_TEMPEST_GUSTING), static_cast<int>(windGustMph + 0.5f));
   renderer.drawCenteredText(UI_12_FONT_ID, 250, windLine);
 
   char battLine[32];

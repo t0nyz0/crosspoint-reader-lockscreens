@@ -25,73 +25,23 @@
 #include "network/HttpDownloader.h"
 
 namespace {
-// WMO weather codes (https://open-meteo.com/en/docs) collapsed into broad
-// categories for a short label + a simple primitive-drawn icon.
-enum class WxCategory { Clear, PartlyCloudy, Cloudy, Fog, Drizzle, Rain, Snow, Storm };
-
-WxCategory categoryForCode(int code) {
-  if (code == 0) return WxCategory::Clear;
-  if (code == 1 || code == 2) return WxCategory::PartlyCloudy;
-  if (code == 3) return WxCategory::Cloudy;
-  if (code == 45 || code == 48) return WxCategory::Fog;
-  if (code >= 51 && code <= 57) return WxCategory::Drizzle;
-  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return WxCategory::Rain;
-  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return WxCategory::Snow;
-  if (code >= 95) return WxCategory::Storm;
-  return WxCategory::Cloudy;
+// WMO weather codes (https://open-meteo.com/en/docs) collapsed into the
+// shared DashboardUI::WxCategory for a short label + primitive-drawn icon.
+DashboardUI::WxCategory categoryForCode(int code) {
+  if (code == 0) return DashboardUI::WxCategory::Clear;
+  if (code == 1 || code == 2) return DashboardUI::WxCategory::PartlyCloudy;
+  if (code == 3) return DashboardUI::WxCategory::Cloudy;
+  if (code == 45 || code == 48) return DashboardUI::WxCategory::Fog;
+  if (code >= 51 && code <= 57) return DashboardUI::WxCategory::Drizzle;
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return DashboardUI::WxCategory::Rain;
+  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return DashboardUI::WxCategory::Snow;
+  if (code >= 95) return DashboardUI::WxCategory::Storm;
+  return DashboardUI::WxCategory::Cloudy;
 }
 
-void drawWeatherIcon(const GfxRenderer& renderer, int code, int x, int y, int size) {
-  const WxCategory cat = categoryForCode(code);
-  const int r = size / 2;
-
-  if (cat == WxCategory::Clear || cat == WxCategory::PartlyCloudy) {
-    // Sun: filled blob + short rays
-    renderer.fillRoundedRect(x, y, r, r, r / 2, Color::Black);
-    renderer.drawLine(x + r / 2, y - 4, x + r / 2, y - 1);
-    renderer.drawLine(x + r / 2, y + r + 1, x + r / 2, y + r + 4);
-    renderer.drawLine(x - 4, y + r / 2, x - 1, y + r / 2);
-    renderer.drawLine(x + r + 1, y + r / 2, x + r + 4, y + r / 2);
-  }
-  if (cat == WxCategory::Clear) return;
-
-  // Cloud body for everything else (partly-cloudy layers it under the sun)
-  const int cx = cat == WxCategory::PartlyCloudy ? x + r / 2 : x;
-  const int cy = cat == WxCategory::PartlyCloudy ? y + r / 2 : y;
-  const int cw = size;
-  const int ch = size * 2 / 3;
-  renderer.fillRoundedRect(cx, cy, cw, ch, ch / 2, Color::Black);
-
-  switch (cat) {
-    case WxCategory::Rain:
-    case WxCategory::Drizzle:
-      for (int i = 0; i < 3; i++) {
-        const int dx = cx + 4 + i * (cw - 8) / 2;
-        renderer.drawLine(dx, cy + ch + 2, dx - 2, cy + ch + 8, 2, true);
-      }
-      break;
-    case WxCategory::Snow:
-      for (int i = 0; i < 3; i++) {
-        const int dx = cx + 4 + i * (cw - 8) / 2;
-        renderer.fillRect(dx - 1, cy + ch + 3, 3, 3);
-      }
-      break;
-    case WxCategory::Storm:
-      renderer.drawLine(cx + cw / 2 + 2, cy + ch, cx + cw / 2 - 3, cy + ch + 5, 2, true);
-      renderer.drawLine(cx + cw / 2 - 3, cy + ch + 5, cx + cw / 2 + 1, cy + ch + 5, 2, true);
-      renderer.drawLine(cx + cw / 2 + 1, cy + ch + 5, cx + cw / 2 - 4, cy + ch + 10, 2, true);
-      break;
-    case WxCategory::Fog:
-      for (int i = 0; i < 3; i++) {
-        renderer.fillRect(cx, cy + ch + 2 + i * 4, cw, 2);
-      }
-      break;
-    default:
-      break;
-  }
+void drawWeatherBrandIcon(const GfxRenderer& renderer, int x, int y) {
+  DashboardUI::drawWeatherIcon(renderer, DashboardUI::WxCategory::Clear, x, y, 22);
 }
-
-void drawWeatherBrandIcon(const GfxRenderer& renderer, int x, int y) { drawWeatherIcon(renderer, 2, x, y, 22); }
 }  // namespace
 
 void WeatherDashboardActivity::onEnter() {
@@ -426,7 +376,7 @@ void WeatherDashboardActivity::renderDashboard() const {
   DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
   renderer.drawText(UI_10_FONT_ID, sideMargin, 130, SETTINGS.weatherPlaceName);
 
-  drawWeatherIcon(renderer, currentWeatherCode, sideMargin + 220, 55, 40);
+  DashboardUI::drawWeatherIcon(renderer, categoryForCode(currentWeatherCode), sideMargin + 220, 55, 40);
 
   // --- Top right: 2x2 stat grid ---
   struct StatEntry {
@@ -462,7 +412,7 @@ void WeatherDashboardActivity::renderDashboard() const {
       const int labelW = renderer.getTextWidth(UI_10_FONT_ID, forecast[i].label, EpdFontFamily::BOLD);
       renderer.drawText(UI_10_FONT_ID, cx - labelW / 2, 224, forecast[i].label, true, EpdFontFamily::BOLD);
 
-      drawWeatherIcon(renderer, forecast[i].weatherCode, cx - 12, 254, 30);
+      DashboardUI::drawWeatherIcon(renderer, categoryForCode(forecast[i].weatherCode), cx - 12, 254, 30);
 
       char line[16];
       snprintf(line, sizeof(line), "%d/%d", forecast[i].hi, forecast[i].lo);
