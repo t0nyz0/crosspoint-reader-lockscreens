@@ -73,7 +73,13 @@ class TempestDashboardActivity final : public Activity {
   void computePressureTrend();
   void goToSleepAndPoll();
 
-  void renderDashboard() const;
+  // footerStatusOverride: nullptr shows the normal "Updated <time>" line;
+  // non-null replaces the prefix (e.g. "Waiting for Tempest") while keeping
+  // the timestamp, for a refresh in flight or a failed one, without
+  // disturbing the rest of the (still-valid, cached) dashboard.
+  // isFinal: true for a fresh reading (full refresh, worth the flash);
+  // false for a transient status-only repaint (fast refresh).
+  void renderDashboard(const char* footerStatusOverride = nullptr, bool isFinal = true) const;
   void renderMessage(const char* message) const;
 
   DashboardUI::WxCategory localWeatherCategory() const;

@@ -152,11 +152,8 @@ void TempestDashboardActivity::loop() {
         return;
       }
       if (millis() - wifiConnectStart >= WIFI_TIMEOUT_MS) {
-        LOG_ERR("TMP", "Unattended WiFi connect timed out");
-        state = State::Failed;
-        errorMessage = tr(STR_DASHBOARD_WIFI_FAILED);
-        requestUpdateAndWait();
-        goToSleepAndPoll();
+        LOG_ERR("TMP", "Unattended WiFi connect timed out, leaving last-known dashboard on screen");
+        goToSleepAndPoll();  // retry next cycle; nothing valid in memory to redraw with on this fresh boot
       }
       return;
 
@@ -349,6 +346,17 @@ void TempestDashboardActivity::runFetch() {
     LOG_ERR("TMP", "No Tempest observation received");
     state = State::Failed;
     errorMessage = tr(STR_TEMPEST_NOT_FOUND);
+
+    if (autoRefresh) {
+      // Unattended: a fresh boot's in-memory stats are all zeroed (nothing
+      // survives a reboot except what's already physically on the e-ink
+      // panel), so there's no valid data to redraw. Skip the render entirely
+      // rather than blanking the last-known-good dashboard to an error
+      // screen for the whole next sleep interval -- just retry next cycle.
+      LOG_INF("TMP", "Leaving last-known dashboard on screen, retrying next cycle");
+      goToSleepAndPoll();
+      return;
+    }
   } else {
     computePressureTrend();
     DashboardUI::formatUpdatedStamp(lastUpdated, sizeof(lastUpdated));
@@ -375,18 +383,30 @@ void TempestDashboardActivity::goToSleepAndPoll() {
 }
 
 void TempestDashboardActivity::render(RenderLock&&) {
+  // A non-empty lastUpdated means this exact session already parsed a real
+  // observation, so every other stat field is guaranteed valid too (they're
+  // set together, right before lastUpdated) -- safe to keep redrawing the
+  // full dashboard with a swapped-out footer line instead of blanking to a
+  // message screen while a manually-forced refresh is in flight or fails.
+  const bool hasCache = lastUpdated[0] != '\0';
   switch (state) {
     case State::Connecting:
-      renderMessage(tr(STR_TEMPEST_SEARCHING));
-      break;
     case State::Fetching:
-      renderMessage(tr(STR_TEMPEST_SEARCHING));
+      if (hasCache) {
+        renderDashboard(tr(STR_TEMPEST_WAITING), false);
+      } else {
+        renderMessage(tr(STR_TEMPEST_SEARCHING));
+      }
       break;
     case State::Failed:
-      renderMessage(errorMessage ? errorMessage : tr(STR_TEMPEST_NOT_FOUND));
+      if (hasCache) {
+        renderDashboard(tr(STR_TEMPEST_REFRESH_FAILED), false);
+      } else {
+        renderMessage(errorMessage ? errorMessage : tr(STR_TEMPEST_NOT_FOUND));
+      }
       break;
     case State::Showing:
-      renderDashboard();
+      renderDashboard(nullptr, true);
       break;
   }
 }
@@ -410,7 +430,7 @@ void TempestDashboardActivity::renderMessage(const char* message) const {
   renderer.displayBuffer();
 }
 
-void TempestDashboardActivity::renderDashboard() const {
+void TempestDashboardActivity::renderDashboard(const char* footerStatusOverride, bool isFinal) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   const auto origOrientation = renderer.getOrientation();
@@ -549,8 +569,13 @@ void TempestDashboardActivity::renderDashboard() const {
   char battLine[24];
   snprintf(battLine, sizeof(battLine), "%.2fV", stationBatteryV);
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawTempestBrandIcon, label,
-                          tr(STR_DASHBOARD_UPDATED), lastUpdated, battLine);
+                          footerStatusOverride ? footerStatusOverride : tr(STR_DASHBOARD_UPDATED), lastUpdated,
+                          battLine);
 
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  // A fresh reading gets a full refresh (this frame stays up for the whole
+  // sleep interval, so it's worth the flash to avoid ghosting). A transient
+  // "waiting"/"failed" footer swap over an otherwise-unchanged screen uses a
+  // quick partial refresh instead, since it'll be replaced again shortly.
+  renderer.displayBuffer(isFinal ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
   renderer.setOrientation(origOrientation);
 }
