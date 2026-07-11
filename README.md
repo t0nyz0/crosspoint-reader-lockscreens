@@ -1,18 +1,43 @@
-# CrossPoint Reader
+# CrossPoint Reader — Lock Screens Fork
 
-[![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
-
-CrossPoint is open-source e-reader firmware - community-built, fully hackable, free forever. It's maintained by a growing community of developers and readers who believe your device should do what you want - not what a manufacturer decided for you.
+> **This is a community fork of [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader)**, the excellent open-source e-reader firmware for Xteink X3/X4 devices. All credit for the core reader engine goes to the original CrossPoint team and contributors — this fork tracks their `develop` branch and adds one thing on top: **Lock Screens**, described below. Everything else works exactly like upstream CrossPoint.
+>
+> Not affiliated with the CrossPoint project, Xteink, or any device manufacturer.
 
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
 ![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
 
-> If you're planning to buy an Xteink device, consider purchasing an **X3/X4 Developer Edition** through https://crosspointreader.com. CrossPoint receives a small share of each sale, helping fund development costs.
+## What this fork adds: Lock Screens
+
+A new **"Lock Screens"** folder on the home menu holds always-on, periodically-refreshing e-ink dashboards, inspired by TRMNL-style displays. Pick one, and it arms a timed deep sleep: the display stays visible using essentially zero power, waking briefly on its own schedule to refresh, then sleeping again.
+
+- **GitHub Repo** — your GitHub contribution heatmap, current streak/longest streak, most-in-a-day, and average — pulled from your public profile, no token needed.
+- **Weather** — current conditions (temp, feels-like, humidity, wind, rain chance) plus a 5-day forecast for a US ZIP code, via [Open-Meteo](https://open-meteo.com) (free, no API key or account).
+- **Tempest** — live local readings from a [WeatherFlow Tempest](https://weatherflow.com/tempest-weather-system/) weather station: temperature with feels-like, wind speed/gust/lull with a compass dial, humidity, pressure with a 3-hour rising/falling/steady trend, dew point, UV index, illuminance, solar radiation, and lightning distance. Reads the station's local UDP broadcast directly — **no cloud account, API token, or internet dependency** for the station data itself.
+
+Each dashboard has its own refresh interval (Settings → System → *GitHub/Weather/Tempest* Refresh Interval), and a failed refresh never blanks the display — it just keeps showing the last known reading and quietly retries next cycle.
+
+Home → **Lock Screens** → pick one → enter your GitHub username / ZIP code / (optional) station label the first time. WiFi credentials are shared with the rest of CrossPoint (the same saved networks you already use for File Transfer, etc.).
+
+---
+
+## Quick flash
+
+The easiest path — no computer tools required:
+
+1. Download `firmware.bin` from the [latest release](https://github.com/t0nyz0/crosspoint-reader-lockscreens/releases/latest).
+2. Copy `firmware.bin` to the root of your device's SD card.
+3. Power the device off, then hold **Up** + **Power** while turning it back on to enter Recovery Mode.
+4. Select `firmware.bin` from the on-screen list and confirm.
+
+Prefer USB? See [Install firmware](#install-firmware) below for the web installer and command-line (`esptool`) methods — same steps as upstream CrossPoint, just point them at this fork's `firmware.bin` instead.
+
+---
 
 ## What can CrossPoint do?
 
-- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more. 
+- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more.
 
 - **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, and `.bmp`.
 
@@ -25,7 +50,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 - **Library workflow**: folder browser, hidden-file toggle, long-press delete, recent books, SD-cache management.
 
 - **Wireless workflows**:
-  
+
   - File transfer web UI
   - EPUB Optimizer
   - Web settings UI/API (edit many device settings from browser)
@@ -40,21 +65,13 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 - **Localization**: 24 UI languages and counting. RTL support.
 
-### Coming soon:
-
-- Dictionary lookup — inline word lookup without leaving the reader.
-
-- More themes.
-
-- Much more! stay tuned.
-
 ---
 
 ## USB-locked devices (Xteink Unlocker)
 
 Some Xteink units purchased from third-party stores (e.g. AliExpress) ship with USB flashing locked from the factory.
 If your device is locked, you will need to use the **Xteink Unlocker** tool available at
-https://crosspointreader.com/#unlock-tool before you can flash CrossPoint.
+https://crosspointreader.com/#unlock-tool before you can flash any custom firmware, including this fork.
 
 **You do not need this tool if you bought your device directly from xteink.com.** Those units are not locked.
 
@@ -63,29 +80,32 @@ https://crosspointreader.com/#unlock-tool before you can flash CrossPoint.
 USB port or browser before assuming the device is locked. Only reach for the unlocker if the device still doesn't appear.
 
 > ### ⚠️ WARNING: READ THIS BEFORE USING THE UNLOCKER ⚠️
-> 
-> **The only officially supported firmwares in the unlock tool are CrossPoint and CrossInk.**
-> 
-> Flashing any other firmware on a USB-locked device may **permanently brick the device** or leave it **permanently
-> stuck on that firmware with no recovery path**. Once USB flashing is re-locked, your only way back is via OTA, and if
-> the firmware you flashed doesn't support OTA, **there is no way out**.
+>
+> **The only officially supported firmwares in the unlock tool are CrossPoint and CrossInk.** This fork is not one of the
+> officially supported options, so use the SD-card Recovery Mode method above if your device is locked, rather than
+> attempting to flash this fork through the unlocker.
+>
+> Flashing any unsupported firmware on a USB-locked device may **permanently brick the device** or leave it **permanently
+> stuck on that firmware with no recovery path**.
 
 ## Install firmware
 
-### Web installer (recommended)
+### SD card (recommended for this fork)
 
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), and choose an official CrossPoint release.
+See [Quick flash](#quick-flash) above.
 
-### Web installer (specific version)
+### Web installer
 
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Download a `firmware.bin` from [Releases](https://github.com/crosspoint-reader/crosspoint-reader/releases), local build, or continuous integration artifact.
-3. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), click "Custom .bin" and upload a `firmware.bin`.
+1. Connect your device to your computer via USB-C and wake/unlock the device.
+2. Go to https://crosspointreader.com/#flash-tools, select your device (X3 or X4), click **"Custom .bin"**, and upload
+   `firmware.bin` from this fork's [releases page](https://github.com/t0nyz0/crosspoint-reader-lockscreens/releases).
 
-### Revert to Official Firmware
+### Revert to official CrossPoint
 
-To revert to the official firmware, you can also flash the latest official firmware using https://crosspointreader.com/#flash-tools.
+To go back to official upstream CrossPoint at any time, flash the latest official firmware using
+https://crosspointreader.com/#flash-tools, or use its Recovery Mode `firmware.bin` from the
+[upstream releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases). Your books, settings, and SD
+card contents are unaffected either way.
 
 ### Command line
 
@@ -95,7 +115,7 @@ To revert to the official firmware, you can also flash the latest official firmw
 pip install esptool
 ```
 
-2. Download `firmware.bin` from the [releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases).
+2. Download `firmware.bin` from this fork's [releases page](https://github.com/t0nyz0/crosspoint-reader-lockscreens/releases).
 3. Connect your device via USB-C.
 4. Find the device port. On Linux, run `dmesg` after connecting. On macOS:
 
@@ -127,8 +147,6 @@ Convert your own TTF/OTF files into `.cpfont` files that load from the SD card. 
 4. Copy them to your SD card under `/fonts/YourFont/` (or `/.fonts/YourFont/` to hide the folder).
 5. Select the font on the device from the font settings.
 
-Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` script unmodified, so output matches a local host build.
-
 ---
 
 ## Documentation
@@ -153,8 +171,8 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 ### Setup
 
 ```bash
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
+git clone --recursive https://github.com/t0nyz0/crosspoint-reader-lockscreens
+cd crosspoint-reader-lockscreens
 
 # if cloned without --recursive:
 git submodule update --init --recursive
@@ -173,29 +191,6 @@ pio run --target upload
 pio check -e default
 pio run -e default
 ```
-
-### Debugging
-
-After flashing the new features, it’s recommended to capture detailed logs from the serial port.
-
-First, make sure all required Python packages are installed:
-
-```python
-python3 -m pip install pyserial colorama matplotlib
-```
-
-After that run the script:
-
-```sh
-# For Linux
-# This was tested on Debian and should work on most Linux systems.
-python3 scripts/debugging_monitor.py
-
-# For macOS
-python3 scripts/debugging_monitor.py /dev/cu.usbmodem2101
-```
-
-Minor adjustments may be required for Windows.
 
 ---
 
@@ -231,40 +226,14 @@ For more details on the internal file structures, see the [file formats document
 
 ---
 
-## Contributing
+## Relationship to upstream
 
-Contributions are welcome. If you're new to the codebase, start with the [contributing docs](./docs/contributing/README.md). For things to work on, check the [ideas discussion board](https://github.com/crosspoint-reader/crosspoint-reader/discussions/categories/ideas) — leave a comment before starting so we don't duplicate effort.
-
-Everyone here is a volunteer, so please be respectful and patient. For governance and community expectations, see [GOVERNANCE.md](./GOVERNANCE.md).
-
----
-
-## Community forks
-
-One of the best things about open source is that anyone can take the code in a different direction. If you need something outside CrossPoint's [scope](./SCOPE.md), check out the community forks:
-
-- [CrossInk](https://github.com/uxjulia/CrossInk) — Typography and reading tracking: Bionic Reading (bolds word stems to create fixation points), guide dots between words, improved paragraph indents, and replaces the default fonts with ChareInk/Lexend/Bitter.
-
-- [papyrix-reader](https://github.com/bigbag/papyrix-reader) — Adds FB2 and MD format support. Actively maintained with Arabic script support. Custom themes via SD card.
-
-- ~~[crosspet](https://github.com/trilwu/crosspet) — A Vietnamese fork that adds a Tamagotchi-style virtual chicken that grows based on your reading milestones (pages read, streaks, care). Also: Flashcards, Weather, Pomodoro timer, and mini-games.~~ (Unmaintained)
-
-- [crosspoint-reader-cjk](https://github.com/aBER0724/crosspoint-reader-cjk) — Purpose-built for Chinese, Japanese, and Korean reading.
-
-- [inx](https://github.com/obijuankenobiii/inx) — Completely reimagines the user interface with tabbed navigation.
-
-- ~~[PlusPoint](https://github.com/ngxson/pluspoint-reader) — custom JS apps support.~~ (Unmaintained)
-
-- [crosspoint-reader-papers3](https://github.com/juicecultus/crosspoint-reader-papers3) — Crosspoint port for M5Stack Paper S3. 
-
-- [t5s3-reader](https://github.com/ShallowGreen123/t5s3-reader) — Crosspoint port for LilyGo T5 ePaper S3 / T5S3 4.7-inch e-paper device.
-
-**Note:** Many of these features will make their way into CrossPoint over time. We maintain a slower pace to ensure rock-solid stability and squash bugs before they reach your device.
-
-Want to build your own device? Be sure to check out the [de-link](https://github.com/iandchasse/de-link) project.
-
----
+This fork tracks upstream CrossPoint's `develop` branch and merges upstream changes in periodically. Bugs and features
+unrelated to Lock Screens should be reported/requested upstream at
+[crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) — this fork exists only to
+carry the Lock Screens feature on top. Issues specific to Lock Screens (GitHub/Weather/Tempest dashboards) are welcome
+here.
 
 CrossPoint Reader is **not affiliated with Xteink or any device manufacturer**.
 
-Huge shoutout to [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader), which inspired this project.
+Huge shoutout to the CrossPoint maintainers and to [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader), which inspired the original project.
