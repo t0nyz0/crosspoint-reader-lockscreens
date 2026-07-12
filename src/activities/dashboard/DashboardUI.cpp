@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <esp_sntp.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -254,74 +255,112 @@ const char* compassDirection(int degrees) {
   return COMPASS[idx];
 }
 
-void drawWeatherIcon(const GfxRenderer& renderer, WxCategory category, int x, int y, int size) {
-  const int r = size / 2;
+namespace {
+// Filled circle via the rounded-rect trick (corner radius = half the side).
+void fillCircle(const GfxRenderer& r, int cx, int cy, int rad) {
+  if (rad < 1) rad = 1;
+  r.fillRoundedRect(cx - rad, cy - rad, rad * 2, rad * 2, rad, Color::Black);
+}
 
-  if (category == WxCategory::Clear || category == WxCategory::PartlyCloudy) {
-    // Sun: filled disc + 8 rays (cardinal + diagonal), all scaled with size
-    // instead of fixed pixel stubs -- otherwise the rays stay hairline-thin
-    // no matter how big the disc gets.
-    const int rayLen = size / 5 > 3 ? size / 5 : 3;
-    const int rayGap = size / 12 > 1 ? size / 12 : 1;
-    const int rayWidth = size / 20 > 1 ? size / 20 : 1;
-    const int cx = x + r / 2;
-    const int cy = y + r / 2;
-
-    renderer.fillRoundedRect(x, y, r, r, r / 2, Color::Black);
-
-    // Cardinal rays
-    renderer.drawLine(cx, y - rayGap - rayLen, cx, y - rayGap, rayWidth, true);
-    renderer.drawLine(cx, y + r + rayGap, cx, y + r + rayGap + rayLen, rayWidth, true);
-    renderer.drawLine(x - rayGap - rayLen, cy, x - rayGap, cy, rayWidth, true);
-    renderer.drawLine(x + r + rayGap, cy, x + r + rayGap + rayLen, cy, rayWidth, true);
-
-    // Diagonal rays
-    constexpr float kDiag = 0.7071f;  // cos/sin(45 deg)
-    const float innerR = static_cast<float>(r) / 2.0f + rayGap;
-    const float outerR = innerR + rayLen;
-    for (int sx = -1; sx <= 1; sx += 2) {
-      for (int sy = -1; sy <= 1; sy += 2) {
-        const int x1 = cx + static_cast<int>(sx * kDiag * innerR);
-        const int y1 = cy + static_cast<int>(sy * kDiag * innerR);
-        const int x2 = cx + static_cast<int>(sx * kDiag * outerR);
-        const int y2 = cy + static_cast<int>(sy * kDiag * outerR);
-        renderer.drawLine(x1, y1, x2, y2, rayWidth, true);
-      }
-    }
+// Sun: filled disc + 8 rays at 45-degree steps, all scaled to discR.
+void drawSun(const GfxRenderer& r, int cx, int cy, int discR) {
+  fillCircle(r, cx, cy, discR);
+  const int gap = discR * 45 / 100 + 2;
+  const int len = discR * 75 / 100 + 2;
+  const int rayW = discR >= 14 ? 3 : 2;
+  const int inner = discR + gap;
+  const int outer = inner + len;
+  for (int a = 0; a < 8; a++) {
+    const float ang = static_cast<float>(a) * 3.14159265f / 4.0f;
+    const float s = std::sin(ang), c = std::cos(ang);
+    r.drawLine(cx + static_cast<int>(s * inner), cy - static_cast<int>(c * inner),
+               cx + static_cast<int>(s * outer), cy - static_cast<int>(c * outer), rayW, true);
   }
-  if (category == WxCategory::Clear) return;
+}
 
-  // Cloud body for everything else (partly-cloudy layers it under the sun)
-  const int cx = category == WxCategory::PartlyCloudy ? x + r / 2 : x;
-  const int cy = category == WxCategory::PartlyCloudy ? y + r / 2 : y;
-  const int cw = size;
-  const int ch = size * 2 / 3;
-  renderer.fillRoundedRect(cx, cy, cw, ch, ch / 2, Color::Black);
+// Classic cloud silhouette (bumpy top, flat bottom) filling the box
+// [x, x+w) x [y, y+h). A flat base slab plus three overlapping lumps, so the
+// union reads unmistakably as a cloud even as a solid 1-bit shape (rather than
+// the single oval it used to be).
+void drawCloud(const GfxRenderer& r, int x, int y, int w, int h) {
+  // Rounded base slab (rounded bottom corners keep it from looking boxy) plus
+  // three overlapping lumps -- big center, lower/wider sides that bulge out.
+  const int baseTop = y + h * 46 / 100;
+  r.fillRoundedRect(x + w * 12 / 100, baseTop, w * 76 / 100, (y + h) - baseTop, h * 22 / 100, Color::Black);
+  fillCircle(r, x + w * 50 / 100, y + h * 34 / 100, h * 32 / 100);  // center (tallest)
+  fillCircle(r, x + w * 28 / 100, y + h * 54 / 100, h * 26 / 100);  // left
+  fillCircle(r, x + w * 72 / 100, y + h * 52 / 100, h * 27 / 100);  // right
+}
+}  // namespace
+
+void drawWeatherIcon(const GfxRenderer& renderer, WxCategory category, int x, int y, int size) {
+  if (category == WxCategory::Clear) {
+    drawSun(renderer, x + size / 2, y + size / 2, size * 30 / 100);
+    return;
+  }
+  if (category == WxCategory::PartlyCloudy) {
+    // Small sun peeking from the top-left, cloud overlapping the lower-right.
+    drawSun(renderer, x + size * 34 / 100, y + size * 30 / 100, size * 18 / 100);
+    drawCloud(renderer, x + size * 18 / 100, y + size * 34 / 100, size * 82 / 100, size * 58 / 100);
+    return;
+  }
+
+  // Every other condition is a cloud with something beneath it. Reserve the
+  // lower part of the box for the precipitation/effect marks.
+  const int cloudH = size * 66 / 100;
+  drawCloud(renderer, x, y, size, cloudH);
+  const int precipTop = y + cloudH + std::max(2, size / 20);
 
   switch (category) {
     case WxCategory::Rain:
-    case WxCategory::Drizzle:
+    case WxCategory::Drizzle: {
+      const int streak = category == WxCategory::Rain ? size * 20 / 100 : size * 12 / 100;
       for (int i = 0; i < 3; i++) {
-        const int dx = cx + 4 + i * (cw - 8) / 2;
-        renderer.drawLine(dx, cy + ch + 2, dx - 2, cy + ch + 8, 2, true);
+        const int px = x + size * 30 / 100 + i * size * 20 / 100;
+        renderer.drawLine(px + streak / 3, precipTop, px - streak / 3, precipTop + streak, 2, true);
       }
       break;
-    case WxCategory::Snow:
+    }
+    case WxCategory::Snow: {
+      const int flakeR = size * 8 / 100;
       for (int i = 0; i < 3; i++) {
-        const int dx = cx + 4 + i * (cw - 8) / 2;
-        renderer.fillRect(dx - 1, cy + ch + 3, 3, 3);
+        const int px = x + size * 30 / 100 + i * size * 20 / 100;
+        const int py = precipTop + flakeR;
+        if (flakeR >= 4) {
+          // 3-spoke asterisk flake
+          for (int a = 0; a < 3; a++) {
+            const float ang = static_cast<float>(a) * 3.14159265f / 3.0f;
+            const float s = std::sin(ang), c = std::cos(ang);
+            renderer.drawLine(px - static_cast<int>(c * flakeR), py - static_cast<int>(s * flakeR),
+                              px + static_cast<int>(c * flakeR), py + static_cast<int>(s * flakeR), 1, true);
+          }
+        } else {
+          renderer.fillRect(px - 1, py - 1, 3, 3);
+        }
       }
       break;
-    case WxCategory::Storm:
-      renderer.drawLine(cx + cw / 2 + 2, cy + ch, cx + cw / 2 - 3, cy + ch + 5, 2, true);
-      renderer.drawLine(cx + cw / 2 - 3, cy + ch + 5, cx + cw / 2 + 1, cy + ch + 5, 2, true);
-      renderer.drawLine(cx + cw / 2 + 1, cy + ch + 5, cx + cw / 2 - 4, cy + ch + 10, 2, true);
+    }
+    case WxCategory::Storm: {
+      // Filled lightning bolt (zigzag) centered under the cloud.
+      const int cx = x + size / 2;
+      const int t = precipTop;
+      const int b = precipTop + size * 26 / 100;
+      const int m = (t + b) / 2;
+      const int wdt = size * 10 / 100 + 2;
+      renderer.drawLine(cx + wdt / 2, t, cx - wdt, m, 3, true);
+      renderer.drawLine(cx - wdt, m, cx + wdt / 3, m, 3, true);
+      renderer.drawLine(cx + wdt / 3, m, cx - wdt, b, 3, true);
       break;
-    case WxCategory::Fog:
-      for (int i = 0; i < 3; i++) {
-        renderer.fillRect(cx, cy + ch + 2 + i * 4, cw, 2);
+    }
+    case WxCategory::Fog: {
+      const int n = 3;
+      for (int i = 0; i < n; i++) {
+        const int inset = (i % 2) * (size * 12 / 100);
+        renderer.fillRect(x + size * 12 / 100 + inset, precipTop + i * std::max(3, size / 14),
+                          size * 76 / 100 - inset, std::max(2, size / 28));
       }
       break;
+    }
     default:
       break;
   }
