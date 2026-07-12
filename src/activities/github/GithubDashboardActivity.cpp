@@ -496,12 +496,14 @@ void GithubDashboardActivity::renderDashboard() const {
   char hero[16];
   DashboardUI::formatCompact(statTotal, hero, sizeof(hero));
 
-  // Heatmap geometry differs per orientation; the draw loop is shared below.
-  int hmCellW, hmPitchX, hmCellH, hmPitchY, hmX0, hmY0;
+  // Heatmap geometry differs per orientation. In portrait the 53-week strip is
+  // too wide for 480px, so we wrap the year into 2 stacked strips, keeping the
+  // cells the same comfortable size as landscape instead of shrinking them.
+  int hmCellW, hmPitchX, hmCellH, hmPitchY, hmY0, hmStrips, hmStripGap;
   const int hmLabelGutter = 34;
 
   if (portrait) {
-    // Hero top, caption, 2x2 grid, divider, then a wide-but-short heatmap.
+    // Hero top, caption, 2x2 grid, divider, then a 2-strip heatmap.
     renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
     DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
     renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
@@ -516,11 +518,13 @@ void GithubDashboardActivity::renderDashboard() const {
 
     renderer.fillRect(sideMargin, 392, pageWidth - 2 * sideMargin, 1);
 
-    hmCellW = 6;
-    hmPitchX = 7;
-    hmCellH = 13;
-    hmPitchY = 16;
-    hmY0 = 448;
+    hmCellW = 11;
+    hmPitchX = 13;
+    hmCellH = 11;
+    hmPitchY = 13;
+    hmY0 = 440;
+    hmStrips = 2;
+    hmStripGap = 34;  // vertical gap between the two strips (room for month labels)
   } else {
     // Hero top-left, 2x2 grid top-right, divider, then a full-width heatmap.
     renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
@@ -540,41 +544,56 @@ void GithubDashboardActivity::renderDashboard() const {
     hmCellH = 14;
     hmPitchY = 17;
     hmY0 = 248;
+    hmStrips = 1;
+    hmStripGap = 0;
   }
 
-  // --- Heatmap: weeks as columns, Sunday-first rows, GitHub-style grid ---
+  // --- Heatmap: Sunday-first day rows; weeks run left-to-right, wrapping into
+  // hmStrips stacked strips. One strip (landscape) = the classic GitHub graph. ---
   if (!cells.empty()) {
     const int offset = DashboardUI::dayOfWeekSunday0(cells.front().date);
     const int weeks = (offset + static_cast<int>(cells.size()) + 6) / 7;
-    const int gridW = weeks * hmPitchX;
-    hmX0 = std::max(sideMargin + hmLabelGutter, (pageWidth - gridW + hmLabelGutter) / 2);
+    const int weeksPerStrip = (weeks + hmStrips - 1) / hmStrips;
+    const int gridW = weeksPerStrip * hmPitchX;
+    const int hmX0 = std::max(sideMargin + hmLabelGutter, (pageWidth - gridW + hmLabelGutter) / 2);
+    const int stripBlockH = 7 * hmPitchY + hmStripGap;
+    const auto stripTop = [&](int strip) { return hmY0 + strip * stripBlockH; };
 
-    // Weekday labels like GitHub (rows are Sunday-first)
-    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 1 * hmPitchY - 1, "Mon");
-    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 3 * hmPitchY - 1, "Wed");
-    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 5 * hmPitchY - 1, "Fri");
+    // Weekday labels (Mon/Wed/Fri) to the left of every strip.
+    for (int st = 0; st < hmStrips; st++) {
+      const int sy = stripTop(st);
+      renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, sy + 1 * hmPitchY - 1, "Mon");
+      renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, sy + 3 * hmPitchY - 1, "Wed");
+      renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, sy + 5 * hmPitchY - 1, "Fri");
+    }
 
-    // Month labels above the columns where a new month starts on a week boundary
-    int lastLabelCol = -100;
+    // Month labels above each strip where a new month starts on a week boundary.
+    int lastLabelCol = -100, lastLabelStrip = -1;
     for (size_t i = 0; i < cells.size(); i++) {
       const int slot = offset + static_cast<int>(i);
       if (slot % 7 != 0) continue;  // only the top (Sunday) row starts a column
       const int month = atoi(cells[i].date + 5);
       const int day = atoi(cells[i].date + 8);
       if (day > 7) continue;  // not the first week of the month
-      const int col = slot / 7;
-      if (col - lastLabelCol < 3) continue;  // avoid overlapping labels
+      const int week = slot / 7;
+      const int strip = week / weeksPerStrip;
+      const int col = week % weeksPerStrip;
+      if (strip == lastLabelStrip && col - lastLabelCol < 3) continue;  // avoid overlap within a strip
       if (month >= 1 && month <= 12) {
-        renderer.drawText(SMALL_FONT_ID, hmX0 + col * hmPitchX, hmY0 - 20, MONTH_ABBREV[month - 1]);
+        renderer.drawText(SMALL_FONT_ID, hmX0 + col * hmPitchX, stripTop(strip) - 18, MONTH_ABBREV[month - 1]);
         lastLabelCol = col;
+        lastLabelStrip = strip;
       }
     }
 
     // Crisp level ramp for 1-bit e-ink: dot, outline, gray fill, solid black.
     for (size_t i = 0; i < cells.size(); i++) {
       const int slot = offset + static_cast<int>(i);
-      const int x = hmX0 + (slot / 7) * hmPitchX;
-      const int y = hmY0 + (slot % 7) * hmPitchY;
+      const int week = slot / 7;
+      const int strip = week / weeksPerStrip;
+      const int col = week % weeksPerStrip;
+      const int x = hmX0 + col * hmPitchX;
+      const int y = stripTop(strip) + (slot % 7) * hmPitchY;
       switch (cells[i].level) {
         case 0:
           break;  // blank — dots for every empty day read as noise on e-ink

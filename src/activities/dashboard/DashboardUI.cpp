@@ -116,6 +116,36 @@ void drawStatTile(const GfxRenderer& renderer, int x, int y, const char* value, 
 void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pageWidth, int pageHeight,
                 int sideMargin, BrandIconFn drawIcon, const char* brandLabel, const char* updatedPrefix,
                 const char* lastUpdated, const char* identity) {
+  // In portrait there isn't room for brand + updated-time + identity + battery
+  // on one line, so lay the footer out in two rows: brand/battery on top, the
+  // updated stamp and identity below. Landscape keeps the single-line layout.
+  const bool portrait = pageWidth < 600;
+  const int battX = pageWidth - sideMargin - metrics.batteryWidth;
+
+  if (portrait) {
+    const int sepY = pageHeight - 72;
+    renderer.fillRect(sideMargin, sepY, pageWidth - 2 * sideMargin, 1);
+    const int row1Y = sepY + 14;
+    const int row2Y = sepY + 44;
+
+    // Row 1: brand (left), battery + % (right)
+    if (drawIcon) drawIcon(renderer, sideMargin, sepY + 11);
+    renderer.drawText(UI_10_FONT_ID, sideMargin + 38, row1Y, brandLabel, true, EpdFontFamily::BOLD);
+    GUI.drawBatteryRight(renderer, Rect{battX, row1Y + 2, metrics.batteryWidth, metrics.batteryHeight}, true);
+
+    // Row 2: updated stamp (left), identity (right)
+    if (lastUpdated && lastUpdated[0] != '\0') {
+      char line[48];
+      snprintf(line, sizeof(line), "%s %s", updatedPrefix, lastUpdated);
+      renderer.drawText(SMALL_FONT_ID, sideMargin, row2Y, line);
+    }
+    if (identity && identity[0] != '\0') {
+      const int identityW = renderer.getTextWidth(SMALL_FONT_ID, identity);
+      renderer.drawText(SMALL_FONT_ID, pageWidth - sideMargin - identityW, row2Y, identity);
+    }
+    return;
+  }
+
   const int sepY = pageHeight - 54;
   renderer.fillRect(sideMargin, sepY, pageWidth - 2 * sideMargin, 1);
   const int footerTextY = sepY + 18;
@@ -133,7 +163,6 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
   // glance on e-ink) -- drawBatteryRight puts the icon on the right and the
   // percentage just to its left, so the identity text only needs to clear
   // the percentage label, not guess where the icon starts.
-  const int battX = pageWidth - sideMargin - metrics.batteryWidth;
   char pctText[8];
   snprintf(pctText, sizeof(pctText), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
   const int pctTextW = renderer.getTextWidth(SMALL_FONT_ID, pctText);
