@@ -22,6 +22,8 @@ Each dashboard has its own refresh interval (Settings → System → *GitHub/Wea
 
 Home → **Lock Screens** → pick one → enter your GitHub username / ZIP code / (optional) station label the first time. WiFi credentials are shared with the rest of CrossPoint (the same saved networks you already use for File Transfer, etc.).
 
+**Use one as your actual sleep screen** — set **Settings → Display → Sleep Screen → Lock Screen**, and pick which one under **Lock Screen Type**. Now whenever the device sleeps (auto-timeout or power button), instead of a static image it shows the live dashboard and keeps it refreshed on its interval. Press the power button to wake straight back to your book or home — the lock screen is purely an idle display and never traps you in it.
+
 ---
 
 ## Quick flash

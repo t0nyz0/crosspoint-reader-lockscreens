@@ -103,10 +103,18 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   static const std::vector<SettingInfo> baseList = [] {
     std::vector<SettingInfo> v = {
         // --- Display ---
+        // NOTE: the popup maps array position directly to the stored ordinal, so
+        // this array must stay in SLEEP_SCREEN_MODE value order past index 3.
+        // (Indices 4/5 are a known upstream label swap; STR_LOCK_SCREEN is
+        // appended last to match LOCK_SCREEN = 7.)
         SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
                           {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                           StrId::STR_COVER_CUSTOM, StrId::STR_NONE_OPT, StrId::STR_QUICK_RESUME},
+                           StrId::STR_COVER_CUSTOM, StrId::STR_NONE_OPT, StrId::STR_QUICK_RESUME,
+                           StrId::STR_LOCK_SCREEN},
                           "sleepScreen", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(StrId::STR_LOCK_SCREEN_TYPE, &CrossPointSettings::sleepLockScreenType,
+                          {StrId::STR_GITHUB_DASHBOARD, StrId::STR_WEATHER_DASHBOARD, StrId::STR_TEMPEST_DASHBOARD},
+                          "sleepLockScreenType", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                           {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,

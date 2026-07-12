@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
@@ -213,6 +214,20 @@ void ActivityManager::goToTempestDashboard() {
 
 void ActivityManager::goToLockScreens() {
   replaceActivity(std::make_unique<LockScreensActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToLockScreenDashboard() {
+  switch (SETTINGS.sleepLockScreenType) {
+    case CrossPointSettings::SLEEP_LOCK_WEATHER:
+      replaceActivity(std::make_unique<WeatherDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      break;
+    case CrossPointSettings::SLEEP_LOCK_TEMPEST:
+      replaceActivity(std::make_unique<TempestDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      break;
+    default:
+      replaceActivity(std::make_unique<GithubDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      break;
+  }
 }
 
 void ActivityManager::goToReader(std::string path) {

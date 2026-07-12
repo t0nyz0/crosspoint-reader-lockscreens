@@ -297,6 +297,27 @@ void enterDashboardSleep(uint32_t seconds) {
   abort();  // unreachable: startTimedDeepSleep does not return
 }
 
+// "Sleep Screen = Lock Screen" behavior: instead of drawing a static sleep
+// image and hard-powering off, hand off to the configured lock-screen
+// dashboard in unattended mode. It connects, fetches, renders, then arms its
+// own timed deep sleep (enterDashboardSleep) -- so this MUST NOT sleep or tear
+// down WiFi itself; it just records reader context (so a later power-button
+// wake returns to the book/home) and swaps in the dashboard, then returns and
+// lets the main loop pump the dashboard's async fetch/render/sleep cycle.
+// Returns false when lock-screen sleep isn't enabled, so callers fall back to
+// the normal enterDeepSleep().
+bool enterLockScreenSleep() {
+  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LOCK_SCREEN) return false;
+  // Capture whether we were reading BEFORE the activity is replaced; this is
+  // what routes a later (non-timer) power-button wake back to the book. The
+  // dashboard sets APP_STATE.activeDashboardMode itself when it arms sleep.
+  APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  APP_STATE.showBootScreen = true;  // a real wake out of the mode should show the splash
+  APP_STATE.saveToFile();
+  activityManager.goToLockScreenDashboard();
+  return true;
+}
+
 void setupDisplayAndFonts(bool seamless = false) {
   display.begin(seamless);
   renderer.begin();
@@ -602,20 +623,34 @@ void loop() {
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
-    enterDeepSleep(true);
-    // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
-    return;
-  }
-
-  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
-      gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
+    if (enterLockScreenSleep()) {
+      // Dashboard hand-off: reset the inactivity timer and fall through so
+      // activityManager.loop() below processes the swap. The dashboard's
+      // preventAutoSleep() then keeps this from re-firing until it arms its
+      // own timed sleep (or its WiFi-timeout self-rescue sleeps it).
+      lastActivityTime = millis();
+    } else {
+      enterDeepSleep(true);
+      // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
+      return;
+    }
+  } else if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
+             gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;
     }
-    enterDeepSleep();
-    // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
-    return;
+    if (enterLockScreenSleep()) {
+      // Wait for the button release so the still-held press doesn't re-trigger
+      // this branch every loop, then reset the inactivity timer and fall
+      // through to let the swap process (mirrors startDeepSleep's release wait).
+      waitForPowerRelease();
+      lastActivityTime = millis();
+    } else {
+      enterDeepSleep();
+      // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
+      return;
+    }
   }
 
   // Refresh screen when power button is short-pressed with FORCE_REFRESH setting.

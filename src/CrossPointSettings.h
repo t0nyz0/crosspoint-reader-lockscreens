@@ -32,7 +32,18 @@ class CrossPointSettings {
     BLANK = 4,
     COVER_CUSTOM = 5,
     QUICK_RESUME = 6,
+    LOCK_SCREEN = 7,  // sleep into a lock-screen dashboard (see sleepLockScreenType)
     SLEEP_SCREEN_MODE_COUNT
+    // NOTE: values are persisted by ordinal and the SettingsList picker maps
+    // array position -> stored value directly, so only ever APPEND here.
+  };
+
+  // Which lock-screen dashboard the LOCK_SCREEN sleep mode shows.
+  enum SLEEP_LOCK_SCREEN {
+    SLEEP_LOCK_GITHUB = 0,
+    SLEEP_LOCK_WEATHER = 1,
+    SLEEP_LOCK_TEMPEST = 2,
+    SLEEP_LOCK_SCREEN_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
   enum SLEEP_SCREEN_COVER_FILTER {
@@ -276,6 +287,8 @@ class CrossPointSettings {
   uint8_t tempestRefreshMinutes = 10;
   // Orientation all lock-screen dashboards render in (shared setting).
   uint8_t lockScreenOrientation = LOCK_ORIENT_LANDSCAPE;
+  // Which dashboard the LOCK_SCREEN sleep-screen mode shows.
+  uint8_t sleepLockScreenType = SLEEP_LOCK_GITHUB;
   // Cached ZIP -> lat/lon geocode for the weather dashboard, stored as decimal
   // strings (settings only support uint8_t/char[] fields). Not user-editable;
   // saved/loaded manually since a derived cache doesn't belong in SettingsList.
