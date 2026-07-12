@@ -107,6 +107,12 @@ void drawBigText(const GfxRenderer& renderer, int x, int y, const char* text, in
   }
 }
 
+void drawStatTile(const GfxRenderer& renderer, int x, int y, const char* value, const char* label) {
+  renderer.fillRectDither(x - 16, y, 8, 58, Color::DarkGray);  // accent bar
+  drawBigText(renderer, x, y, value, 5);
+  renderer.drawText(UI_10_FONT_ID, x, y + 40, label);
+}
+
 void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pageWidth, int pageHeight,
                 int sideMargin, BrandIconFn drawIcon, const char* brandLabel, const char* updatedPrefix,
                 const char* lastUpdated, const char* identity) {

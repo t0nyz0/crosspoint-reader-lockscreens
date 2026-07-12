@@ -433,26 +433,79 @@ void TempestDashboardActivity::renderMessage(const char* message) const {
 void TempestDashboardActivity::renderDashboard(const char* footerStatusOverride, bool isFinal) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
+  const bool portrait = SETTINGS.lockScreenOrientation == CrossPointSettings::LOCK_ORIENT_PORTRAIT;
   const auto origOrientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+  renderer.setOrientation(portrait ? GfxRenderer::Orientation::Portrait
+                                    : GfxRenderer::Orientation::LandscapeCounterClockwise);
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  constexpr int sideMargin = 40;
+  const int sideMargin = portrait ? 30 : 40;
 
   renderer.clearScreen();
 
   const char* label = SETTINGS.tempestLabel[0] != '\0' ? SETTINGS.tempestLabel : tr(STR_TEMPEST_DASHBOARD);
+  const DashboardUI::WxCategory condition = localWeatherCategory();
+  const char* conditionLabel = localWeatherLabel();
 
-  // --- Top left: big current temp + station label ---
   char hero[8];
   snprintf(hero, sizeof(hero), "%dF", static_cast<int>(tempF + (tempF >= 0 ? 0.5f : -0.5f)));
+
+  // All 12 stat tiles, prepared once and laid out per orientation. Index 0
+  // (Wind) also gets the compass dial drawn beside it.
+  struct StatEntry {
+    char value[16];
+    const char* label;
+  };
+  StatEntry tiles[12];
+  snprintf(tiles[0].value, sizeof(tiles[0].value), "%d", static_cast<int>(windAvgMph + 0.5f));
+  tiles[0].label = tr(STR_TEMPEST_WIND);
+  snprintf(tiles[1].value, sizeof(tiles[1].value), "%d", static_cast<int>(windGustMph + 0.5f));
+  tiles[1].label = tr(STR_TEMPEST_GUST);
+  snprintf(tiles[2].value, sizeof(tiles[2].value), "%.2f", pressureInHg);
+  tiles[2].label = tr(STR_TEMPEST_PRESSURE);
+  snprintf(tiles[3].value, sizeof(tiles[3].value), "%d%%", humidityPct);
+  tiles[3].label = tr(STR_TEMPEST_HUMIDITY);
+  snprintf(tiles[4].value, sizeof(tiles[4].value), "%.2f", rainLastMinIn);
+  tiles[4].label = tr(STR_TEMPEST_RAIN);
+  snprintf(tiles[5].value, sizeof(tiles[5].value), "%dF",
+           static_cast<int>(dewPointF + (dewPointF >= 0 ? 0.5f : -0.5f)));
+  tiles[5].label = tr(STR_TEMPEST_DEW_POINT);
+  snprintf(tiles[6].value, sizeof(tiles[6].value), "%d", static_cast<int>(uvIndex + 0.5f));
+  tiles[6].label = tr(STR_TEMPEST_UV_INDEX);
+  if (lightningCount > 0) {
+    snprintf(tiles[7].value, sizeof(tiles[7].value), "%d", static_cast<int>(lightningDistMi + 0.5f));
+  } else {
+    snprintf(tiles[7].value, sizeof(tiles[7].value), "-");
+  }
+  tiles[7].label = tr(STR_TEMPEST_LIGHTNING);
+  DashboardUI::formatCompact(static_cast<uint32_t>(illuminanceLux + 0.5f), tiles[8].value, sizeof(tiles[8].value));
+  tiles[8].label = tr(STR_TEMPEST_ILLUMINANCE);
+  snprintf(tiles[9].value, sizeof(tiles[9].value), "%d", static_cast<int>(windLullMph + 0.5f));
+  tiles[9].label = tr(STR_TEMPEST_WIND_LULL);
+  DashboardUI::formatCompact(static_cast<uint32_t>(solarRadiationWm2 + 0.5f), tiles[10].value,
+                             sizeof(tiles[10].value));
+  tiles[10].label = tr(STR_TEMPEST_SOLAR_RAD);
+  if (!pressureTrendValid) {
+    snprintf(tiles[11].value, sizeof(tiles[11].value), "-");
+    tiles[11].label = tr(STR_TEMPEST_PRESSURE_TREND);
+  } else if (pressureTrendDeltaInHg > 0.03f) {
+    snprintf(tiles[11].value, sizeof(tiles[11].value), "%.2f", pressureTrendDeltaInHg);
+    tiles[11].label = tr(STR_TEMPEST_TREND_RISING);
+  } else if (pressureTrendDeltaInHg < -0.03f) {
+    snprintf(tiles[11].value, sizeof(tiles[11].value), "-%.2f", -pressureTrendDeltaInHg);
+    tiles[11].label = tr(STR_TEMPEST_TREND_FALLING);
+  } else {
+    snprintf(tiles[11].value, sizeof(tiles[11].value), "%.2f", pressureTrendDeltaInHg);
+    tiles[11].label = tr(STR_TEMPEST_TREND_STEADY);
+  }
+
+  const char* dir = DashboardUI::compassDirection(windDirDeg);
+
+  // --- Hero + station label (both orientations) ---
   renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
   DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
   renderer.drawText(UI_10_FONT_ID, sideMargin, 130, label);
-
-  // Apparent temperature, only when it meaningfully differs from the actual
-  // reading (heat index / wind chill both collapse to the actual temp
-  // otherwise, so there's nothing worth stating).
+  // Apparent temp only when it meaningfully differs (else it just echoes temp).
   if (fabsf(feelsLikeF - tempF) >= 2.0f) {
     char feelsLine[24];
     snprintf(feelsLine, sizeof(feelsLine), "%s %dF", tr(STR_TEMPEST_FEELS_LIKE),
@@ -460,109 +513,57 @@ void TempestDashboardActivity::renderDashboard(const char* footerStatusOverride,
     renderer.drawText(SMALL_FONT_ID, sideMargin, 150, feelsLine);
   }
 
-  // --- Condition icon + label, between the hero and the stat grid ---
-  // Tempest's local broadcast has no interpreted sky condition (unlike a
-  // cloud weather API), so this is a best-effort local approximation --
-  // see localWeatherCategory().
-  const DashboardUI::WxCategory condition = localWeatherCategory();
-  const char* conditionLabel = localWeatherLabel();
-  constexpr int conditionIconSize = 110;  // fills the gap between the hero and the stat grid
-  constexpr int conditionIconX = 275;
-  constexpr int conditionIconY = 42;
-  DashboardUI::drawWeatherIcon(renderer, condition, conditionIconX, conditionIconY, conditionIconSize);
-  const int conditionLabelW = renderer.getTextWidth(UI_10_FONT_ID, conditionLabel);
-  renderer.drawText(UI_10_FONT_ID, conditionIconX + conditionIconSize / 4 - conditionLabelW / 2, 150, conditionLabel);
+  if (portrait) {
+    // Condition icon top-right of the hero.
+    const int condSize = 80;
+    const int condX = pageWidth - sideMargin - condSize;
+    DashboardUI::drawWeatherIcon(renderer, condition, condX, 46, condSize);
+    const int condLabelW = renderer.getTextWidth(UI_10_FONT_ID, conditionLabel);
+    renderer.drawText(UI_10_FONT_ID, condX + condSize / 4 - condLabelW / 2, 132, conditionLabel);
 
-  // --- Top right: 2x2 stat grid ---
-  struct StatEntry {
-    char value[16];
-    const char* label;
-  };
-  // Wind + Gust share the top row (the two wind-speed readings, side by
-  // side); Pressure + Humidity fill the row below.
-  StatEntry stats[4];
-  snprintf(stats[0].value, sizeof(stats[0].value), "%d", static_cast<int>(windAvgMph + 0.5f));
-  stats[0].label = tr(STR_TEMPEST_WIND);
-  snprintf(stats[1].value, sizeof(stats[1].value), "%d", static_cast<int>(windGustMph + 0.5f));
-  stats[1].label = tr(STR_TEMPEST_GUST);
-  snprintf(stats[2].value, sizeof(stats[2].value), "%.2f", pressureInHg);
-  stats[2].label = tr(STR_TEMPEST_PRESSURE);
-  snprintf(stats[3].value, sizeof(stats[3].value), "%d%%", humidityPct);
-  stats[3].label = tr(STR_TEMPEST_HUMIDITY);
+    renderer.fillRect(sideMargin, 176, pageWidth - 2 * sideMargin, 1);
 
-  for (int s = 0; s < 4; s++) {
-    const int colX = 430 + (s % 2) * 190;
-    const int rowY = 42 + (s / 2) * 78;
-    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
-    DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
-    if (s == 0) {
-      // Wind direction dial beside the speed digits, clear of the next column.
-      DashboardUI::drawWindDial(renderer, colX + 95, rowY + 18, 16, windDirDeg);
-      const char* dir = DashboardUI::compassDirection(windDirDeg);
-      const int dirW = renderer.getTextWidth(SMALL_FONT_ID, dir);
-      renderer.drawText(SMALL_FONT_ID, colX + 95 - dirW / 2, rowY + 40, dir);
+    // All 12 tiles in a 2-column stack.
+    const int col0 = sideMargin + 16;
+    const int col1 = sideMargin + 16 + (pageWidth - 2 * sideMargin) / 2 + 8;
+    for (int i = 0; i < 12; i++) {
+      const int colX = (i % 2 == 0) ? col0 : col1;
+      const int rowY = 198 + (i / 2) * 74;
+      DashboardUI::drawStatTile(renderer, colX, rowY, tiles[i].value, tiles[i].label);
+      if (i == 0) {
+        DashboardUI::drawWindDial(renderer, colX + 92, rowY + 18, 15, windDirDeg);
+        const int dirW = renderer.getTextWidth(SMALL_FONT_ID, dir);
+        renderer.drawText(SMALL_FONT_ID, colX + 92 - dirW / 2, rowY + 40, dir);
+      }
     }
-  }
-
-  renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
-
-  // --- Second stat row: more live local readings. Tempest's local broadcast
-  // has no forecast -- that only exists in WeatherFlow's cloud API -- so this
-  // fills the space with more of what the station itself actually reports.
-  StatEntry row2[4];
-  snprintf(row2[0].value, sizeof(row2[0].value), "%.2f", rainLastMinIn);
-  row2[0].label = tr(STR_TEMPEST_RAIN);
-  snprintf(row2[1].value, sizeof(row2[1].value), "%dF", static_cast<int>(dewPointF + (dewPointF >= 0 ? 0.5f : -0.5f)));
-  row2[1].label = tr(STR_TEMPEST_DEW_POINT);
-  snprintf(row2[2].value, sizeof(row2[2].value), "%d", static_cast<int>(uvIndex + 0.5f));
-  row2[2].label = tr(STR_TEMPEST_UV_INDEX);
-  if (lightningCount > 0) {
-    snprintf(row2[3].value, sizeof(row2[3].value), "%d", static_cast<int>(lightningDistMi + 0.5f));
   } else {
-    snprintf(row2[3].value, sizeof(row2[3].value), "-");
-  }
-  row2[3].label = tr(STR_TEMPEST_LIGHTNING);
+    // Condition icon fills the gap between the hero and the top-right grid.
+    constexpr int condSize = 110;
+    constexpr int condX = 275;
+    DashboardUI::drawWeatherIcon(renderer, condition, condX, 42, condSize);
+    const int condLabelW = renderer.getTextWidth(UI_10_FONT_ID, conditionLabel);
+    renderer.drawText(UI_10_FONT_ID, condX + condSize / 4 - condLabelW / 2, 150, conditionLabel);
 
-  for (int s = 0; s < 4; s++) {
-    const int colX = sideMargin + s * 180;
-    constexpr int rowY = 226;
-    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
-    DashboardUI::drawBigText(renderer, colX, rowY, row2[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, row2[s].label);
-  }
+    // Primary 2x2 grid, top-right (Wind/Gust, then Pressure/Humidity).
+    for (int s = 0; s < 4; s++) {
+      const int colX = 430 + (s % 2) * 190;
+      const int rowY = 42 + (s / 2) * 78;
+      DashboardUI::drawStatTile(renderer, colX, rowY, tiles[s].value, tiles[s].label);
+      if (s == 0) {
+        DashboardUI::drawWindDial(renderer, colX + 95, rowY + 18, 16, windDirDeg);
+        const int dirW = renderer.getTextWidth(SMALL_FONT_ID, dir);
+        renderer.drawText(SMALL_FONT_ID, colX + 95 - dirW / 2, rowY + 40, dir);
+      }
+    }
 
-  // --- Third stat row: illuminance, wind lull, solar radiation, and the
-  // ~3-hour pressure tendency -- again all local, zero extra network calls.
-  StatEntry row3[4];
-  DashboardUI::formatCompact(static_cast<uint32_t>(illuminanceLux + 0.5f), row3[0].value, sizeof(row3[0].value));
-  row3[0].label = tr(STR_TEMPEST_ILLUMINANCE);
-  snprintf(row3[1].value, sizeof(row3[1].value), "%d", static_cast<int>(windLullMph + 0.5f));
-  row3[1].label = tr(STR_TEMPEST_WIND_LULL);
-  DashboardUI::formatCompact(static_cast<uint32_t>(solarRadiationWm2 + 0.5f), row3[2].value, sizeof(row3[2].value));
-  row3[2].label = tr(STR_TEMPEST_SOLAR_RAD);
-  const char* trendLabelText;
-  if (!pressureTrendValid) {
-    snprintf(row3[3].value, sizeof(row3[3].value), "-");
-    trendLabelText = tr(STR_TEMPEST_PRESSURE_TREND);
-  } else if (pressureTrendDeltaInHg > 0.03f) {
-    snprintf(row3[3].value, sizeof(row3[3].value), "%.2f", pressureTrendDeltaInHg);
-    trendLabelText = tr(STR_TEMPEST_TREND_RISING);
-  } else if (pressureTrendDeltaInHg < -0.03f) {
-    snprintf(row3[3].value, sizeof(row3[3].value), "-%.2f", -pressureTrendDeltaInHg);
-    trendLabelText = tr(STR_TEMPEST_TREND_FALLING);
-  } else {
-    snprintf(row3[3].value, sizeof(row3[3].value), "%.2f", pressureTrendDeltaInHg);
-    trendLabelText = tr(STR_TEMPEST_TREND_STEADY);
-  }
-  row3[3].label = trendLabelText;
+    renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
 
-  for (int s = 0; s < 4; s++) {
-    const int colX = sideMargin + s * 180;
-    constexpr int rowY = 304;
-    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
-    DashboardUI::drawBigText(renderer, colX, rowY, row3[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, row3[s].label);
+    // Secondary tiles 4..11 in two rows of four.
+    for (int i = 4; i < 12; i++) {
+      const int colX = sideMargin + ((i - 4) % 4) * 180;
+      const int rowY = 226 + ((i - 4) / 4) * 78;
+      DashboardUI::drawStatTile(renderer, colX, rowY, tiles[i].value, tiles[i].label);
+    }
   }
 
   // --- Footer bar: station battery takes the "identity" slot ---

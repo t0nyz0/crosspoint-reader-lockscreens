@@ -74,6 +74,13 @@ class CrossPointSettings {
 
   enum STATUS_BAR_CLOCK_MODE { STATUS_BAR_CLOCK_HIDE = 0, STATUS_BAR_CLOCK_RIGHT = 1, STATUS_BAR_CLOCK_LEFT = 2 };
 
+  // Orientation for the lock-screen dashboards (GitHub/Weather/Tempest).
+  enum LOCK_SCREEN_ORIENTATION {
+    LOCK_ORIENT_LANDSCAPE = 0,  // 800x480 (default)
+    LOCK_ORIENT_PORTRAIT = 1,   // 480x800
+    LOCK_ORIENT_COUNT
+  };
+
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
     LANDSCAPE_CW = 1,   // 800x480 logical coordinates, rotated 180° (swap top/bottom)
@@ -267,6 +274,8 @@ class CrossPointSettings {
   uint8_t githubRefreshMinutes = 60;
   uint8_t weatherRefreshMinutes = 30;
   uint8_t tempestRefreshMinutes = 10;
+  // Orientation all lock-screen dashboards render in (shared setting).
+  uint8_t lockScreenOrientation = LOCK_ORIENT_LANDSCAPE;
   // Cached ZIP -> lat/lon geocode for the weather dashboard, stored as decimal
   // strings (settings only support uint8_t/char[] fields). Not user-editable;
   // saved/loaded manually since a derived cache doesn't belong in SettingsList.

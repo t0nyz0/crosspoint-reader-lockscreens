@@ -361,24 +361,17 @@ void WeatherDashboardActivity::renderMessage(const char* message) const {
 void WeatherDashboardActivity::renderDashboard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
+  const bool portrait = SETTINGS.lockScreenOrientation == CrossPointSettings::LOCK_ORIENT_PORTRAIT;
   const auto origOrientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+  renderer.setOrientation(portrait ? GfxRenderer::Orientation::Portrait
+                                    : GfxRenderer::Orientation::LandscapeCounterClockwise);
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  constexpr int sideMargin = 40;
+  const int sideMargin = portrait ? 30 : 40;
 
   renderer.clearScreen();
 
-  // --- Top left: big current temp + place name (TRMNL style) ---
-  char hero[8];
-  snprintf(hero, sizeof(hero), "%dF", currentTempF);
-  renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
-  DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
-  renderer.drawText(UI_10_FONT_ID, sideMargin, 130, SETTINGS.weatherPlaceName);
-
-  DashboardUI::drawWeatherIcon(renderer, categoryForCode(currentWeatherCode), sideMargin + 220, 55, 40);
-
-  // --- Top right: 2x2 stat grid ---
+  // --- Stat data (shared) ---
   struct StatEntry {
     char value[16];
     const char* label;
@@ -393,31 +386,68 @@ void WeatherDashboardActivity::renderDashboard() const {
   snprintf(stats[3].value, sizeof(stats[3].value), "%d%%", rainChancePct);
   stats[3].label = tr(STR_WEATHER_RAIN_CHANCE);
 
-  for (int s = 0; s < 4; s++) {
-    const int colX = 430 + (s % 2) * 190;
-    const int rowY = 42 + (s / 2) * 78;
-    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);
-    DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
-  }
+  char hero[8];
+  snprintf(hero, sizeof(hero), "%dF", currentTempF);
 
-  renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
+  if (portrait) {
+    // Hero + condition icon on top, 2x2 grid, divider, vertical forecast list.
+    renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
+    renderer.drawText(UI_10_FONT_ID, sideMargin, 130, SETTINGS.weatherPlaceName);
+    DashboardUI::drawWeatherIcon(renderer, categoryForCode(currentWeatherCode), pageWidth - sideMargin - 66, 50, 56);
 
-  // --- Forecast row: day + icon + hi/lo, each centered within its own column ---
-  if (forecastCount > 0) {
-    const int colW = (pageWidth - 2 * sideMargin) / forecastCount;
-    for (int i = 0; i < forecastCount; i++) {
-      const int cx = sideMargin + i * colW + colW / 2;
+    renderer.fillRect(sideMargin, 176, pageWidth - 2 * sideMargin, 1);
 
-      const int labelW = renderer.getTextWidth(UI_10_FONT_ID, forecast[i].label, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, cx - labelW / 2, 224, forecast[i].label, true, EpdFontFamily::BOLD);
+    for (int s = 0; s < 4; s++) {
+      const int colX = sideMargin + 16 + (s % 2) * ((pageWidth - 2 * sideMargin) / 2 + 8);
+      const int rowY = 200 + (s / 2) * 92;
+      DashboardUI::drawStatTile(renderer, colX, rowY, stats[s].value, stats[s].label);
+    }
 
-      DashboardUI::drawWeatherIcon(renderer, categoryForCode(forecast[i].weatherCode), cx - 12, 254, 30);
+    renderer.fillRect(sideMargin, 392, pageWidth - 2 * sideMargin, 1);
 
-      char line[16];
-      snprintf(line, sizeof(line), "%d/%d", forecast[i].hi, forecast[i].lo);
-      const int lineW = renderer.getTextWidth(SMALL_FONT_ID, line);
-      renderer.drawText(SMALL_FONT_ID, cx - lineW / 2, 302, line);
+    // Forecast as a vertical list (reads better than a cramped row in portrait):
+    // day (left, bold) | icon (mid) | hi/lo (right).
+    if (forecastCount > 0) {
+      const int rowH = 62;
+      const int startY = 412;
+      for (int i = 0; i < forecastCount; i++) {
+        const int rowY = startY + i * rowH;
+        renderer.drawText(UI_12_FONT_ID, sideMargin, rowY + 6, forecast[i].label, true, EpdFontFamily::BOLD);
+        DashboardUI::drawWeatherIcon(renderer, categoryForCode(forecast[i].weatherCode), sideMargin + 150, rowY, 28);
+        char line[16];
+        snprintf(line, sizeof(line), "%d / %d", forecast[i].hi, forecast[i].lo);
+        const int lineW = renderer.getTextWidth(UI_12_FONT_ID, line);
+        renderer.drawText(UI_12_FONT_ID, pageWidth - sideMargin - lineW, rowY + 6, line);
+      }
+    }
+  } else {
+    // Hero + condition icon top-left, 2x2 grid top-right, horizontal forecast row.
+    renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
+    renderer.drawText(UI_10_FONT_ID, sideMargin, 130, SETTINGS.weatherPlaceName);
+    DashboardUI::drawWeatherIcon(renderer, categoryForCode(currentWeatherCode), sideMargin + 220, 55, 40);
+
+    for (int s = 0; s < 4; s++) {
+      const int colX = 430 + (s % 2) * 190;
+      const int rowY = 42 + (s / 2) * 78;
+      DashboardUI::drawStatTile(renderer, colX, rowY, stats[s].value, stats[s].label);
+    }
+
+    renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
+
+    if (forecastCount > 0) {
+      const int colW = (pageWidth - 2 * sideMargin) / forecastCount;
+      for (int i = 0; i < forecastCount; i++) {
+        const int cx = sideMargin + i * colW + colW / 2;
+        const int labelW = renderer.getTextWidth(UI_10_FONT_ID, forecast[i].label, EpdFontFamily::BOLD);
+        renderer.drawText(UI_10_FONT_ID, cx - labelW / 2, 224, forecast[i].label, true, EpdFontFamily::BOLD);
+        DashboardUI::drawWeatherIcon(renderer, categoryForCode(forecast[i].weatherCode), cx - 12, 254, 30);
+        char line[16];
+        snprintf(line, sizeof(line), "%d/%d", forecast[i].hi, forecast[i].lo);
+        const int lineW = renderer.getTextWidth(SMALL_FONT_ID, line);
+        renderer.drawText(SMALL_FONT_ID, cx - lineW / 2, 302, line);
+      }
     }
   }
 

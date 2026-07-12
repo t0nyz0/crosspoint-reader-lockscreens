@@ -18,6 +18,8 @@ A new **"Lock Screens"** folder on the home menu holds always-on, periodically-r
 
 Each dashboard has its own refresh interval (Settings → System → *GitHub/Weather/Tempest* Refresh Interval), and a failed refresh never blanks the display — it just keeps showing the last known reading and quietly retries next cycle.
 
+**Orientation** — all three dashboards render in either **landscape** (800×480, the default) or **portrait** (480×800), controlled by a single **Settings → System → Lock Screen Orientation** toggle. Landscape suits a device propped on a stand; portrait matches how you'd hold the reader. Each dashboard has a purpose-built layout for both (e.g. the weather forecast is a horizontal strip in landscape and a vertical list in portrait), not just a rotated image.
+
 Home → **Lock Screens** → pick one → enter your GitHub username / ZIP code / (optional) station label the first time. WiFi credentials are shared with the rest of CrossPoint (the same saved networks you already use for File Transfer, etc.).
 
 ---

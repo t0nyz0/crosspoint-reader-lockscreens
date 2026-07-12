@@ -201,6 +201,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                            {5, 240, 5}, "weatherRefreshMinutes", StrId::STR_CAT_SYSTEM),
         SettingInfo::Value(StrId::STR_TEMPEST_REFRESH_INTERVAL, &CrossPointSettings::tempestRefreshMinutes, {2, 60, 1},
                            "tempestRefreshMinutes", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Enum(StrId::STR_LOCK_SCREEN_ORIENTATION, &CrossPointSettings::lockScreenOrientation,
+                          {StrId::STR_LANDSCAPE, StrId::STR_PORTRAIT}, "lockScreenOrientation", StrId::STR_CAT_SYSTEM),
         // Web/JSON only (edited on-device inside each dashboard itself); the
         // category keeps these out of the four device settings tabs.
         SettingInfo::String(StrId::STR_GITHUB_USERNAME, SETTINGS.githubUsername,

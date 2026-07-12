@@ -462,23 +462,17 @@ void drawGithubBrandIcon(const GfxRenderer& renderer, int x, int y) {
 void GithubDashboardActivity::renderDashboard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  // The dashboard is a landscape screen; restore the caller's orientation when done.
+  const bool portrait = SETTINGS.lockScreenOrientation == CrossPointSettings::LOCK_ORIENT_PORTRAIT;
   const auto origOrientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
-  const auto pageWidth = renderer.getScreenWidth();    // 800
-  const auto pageHeight = renderer.getScreenHeight();  // 480
-  constexpr int sideMargin = 40;
+  renderer.setOrientation(portrait ? GfxRenderer::Orientation::Portrait
+                                    : GfxRenderer::Orientation::LandscapeCounterClockwise);
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const int sideMargin = portrait ? 30 : 40;
 
   renderer.clearScreen();
 
-  // --- Top left: big compact total + caption (TRMNL style) ---
-  char hero[16];
-  DashboardUI::formatCompact(statTotal, hero, sizeof(hero));
-  renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);  // accent bar
-  DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
-  renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
-
-  // --- Top right: 2x2 stat grid ---
+  // --- Stat data (shared by both orientations) ---
   struct StatEntry {
     char value[16];
     const char* label;
@@ -499,33 +493,66 @@ void GithubDashboardActivity::renderDashboard() const {
   stats[2].label = tr(STR_GITHUB_MOST_IN_DAY);
   stats[3].label = tr(STR_GITHUB_AVG_PER_DAY);
 
-  for (int s = 0; s < 4; s++) {
-    const int colX = 430 + (s % 2) * 190;
-    const int rowY = 42 + (s / 2) * 78;
-    renderer.fillRectDither(colX - 16, rowY, 8, 58, Color::DarkGray);  // accent bar
-    DashboardUI::drawBigText(renderer, colX, rowY, stats[s].value, 5);
-    renderer.drawText(UI_10_FONT_ID, colX, rowY + 40, stats[s].label);
-  }
+  char hero[16];
+  DashboardUI::formatCompact(statTotal, hero, sizeof(hero));
 
-  renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
+  // Heatmap geometry differs per orientation; the draw loop is shared below.
+  int hmCellW, hmPitchX, hmCellH, hmPitchY, hmX0, hmY0;
+  const int hmLabelGutter = 34;
+
+  if (portrait) {
+    // Hero top, caption, 2x2 grid, divider, then a wide-but-short heatmap.
+    renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
+    renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
+
+    renderer.fillRect(sideMargin, 176, pageWidth - 2 * sideMargin, 1);
+
+    for (int s = 0; s < 4; s++) {
+      const int colX = sideMargin + 16 + (s % 2) * ((pageWidth - 2 * sideMargin) / 2 + 8);
+      const int rowY = 200 + (s / 2) * 92;
+      DashboardUI::drawStatTile(renderer, colX, rowY, stats[s].value, stats[s].label);
+    }
+
+    renderer.fillRect(sideMargin, 392, pageWidth - 2 * sideMargin, 1);
+
+    hmCellW = 6;
+    hmPitchX = 7;
+    hmCellH = 13;
+    hmPitchY = 16;
+    hmY0 = 448;
+  } else {
+    // Hero top-left, 2x2 grid top-right, divider, then a full-width heatmap.
+    renderer.fillRectDither(sideMargin - 16, 42, 8, 74, Color::DarkGray);
+    DashboardUI::drawBigText(renderer, sideMargin, 42, hero, 10);
+    renderer.drawText(UI_10_FONT_ID, sideMargin, 130, tr(STR_GITHUB_CONTRIB_CAPTION));
+
+    for (int s = 0; s < 4; s++) {
+      const int colX = 430 + (s % 2) * 190;
+      const int rowY = 42 + (s / 2) * 78;
+      DashboardUI::drawStatTile(renderer, colX, rowY, stats[s].value, stats[s].label);
+    }
+
+    renderer.fillRect(sideMargin, 196, pageWidth - 2 * sideMargin, 1);
+
+    hmCellW = 11;
+    hmPitchX = 13;
+    hmCellH = 14;
+    hmPitchY = 17;
+    hmY0 = 248;
+  }
 
   // --- Heatmap: weeks as columns, Sunday-first rows, GitHub-style grid ---
   if (!cells.empty()) {
     const int offset = DashboardUI::dayOfWeekSunday0(cells.front().date);
     const int weeks = (offset + static_cast<int>(cells.size()) + 6) / 7;
-    constexpr int cellW = 11;
-    constexpr int pitchX = 13;
-    constexpr int cellH = 14;
-    constexpr int pitchY = 17;
-    const int gridW = weeks * pitchX;
-    const int labelGutter = 34;  // room for Mon/Wed/Fri labels
-    const int x0 = std::max(sideMargin + labelGutter, (pageWidth - gridW + labelGutter) / 2);
-    const int y0 = 248;
+    const int gridW = weeks * hmPitchX;
+    hmX0 = std::max(sideMargin + hmLabelGutter, (pageWidth - gridW + hmLabelGutter) / 2);
 
     // Weekday labels like GitHub (rows are Sunday-first)
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 1 * pitchY - 1, "Mon");
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 3 * pitchY - 1, "Wed");
-    renderer.drawText(SMALL_FONT_ID, x0 - labelGutter, y0 + 5 * pitchY - 1, "Fri");
+    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 1 * hmPitchY - 1, "Mon");
+    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 3 * hmPitchY - 1, "Wed");
+    renderer.drawText(SMALL_FONT_ID, hmX0 - hmLabelGutter, hmY0 + 5 * hmPitchY - 1, "Fri");
 
     // Month labels above the columns where a new month starts on a week boundary
     int lastLabelCol = -100;
@@ -538,7 +565,7 @@ void GithubDashboardActivity::renderDashboard() const {
       const int col = slot / 7;
       if (col - lastLabelCol < 3) continue;  // avoid overlapping labels
       if (month >= 1 && month <= 12) {
-        renderer.drawText(SMALL_FONT_ID, x0 + col * pitchX, y0 - 20, MONTH_ABBREV[month - 1]);
+        renderer.drawText(SMALL_FONT_ID, hmX0 + col * hmPitchX, hmY0 - 20, MONTH_ABBREV[month - 1]);
         lastLabelCol = col;
       }
     }
@@ -546,20 +573,20 @@ void GithubDashboardActivity::renderDashboard() const {
     // Crisp level ramp for 1-bit e-ink: dot, outline, gray fill, solid black.
     for (size_t i = 0; i < cells.size(); i++) {
       const int slot = offset + static_cast<int>(i);
-      const int x = x0 + (slot / 7) * pitchX;
-      const int y = y0 + (slot % 7) * pitchY;
+      const int x = hmX0 + (slot / 7) * hmPitchX;
+      const int y = hmY0 + (slot % 7) * hmPitchY;
       switch (cells[i].level) {
         case 0:
           break;  // blank — dots for every empty day read as noise on e-ink
         case 1:
-          renderer.drawRoundedRect(x, y, cellW, cellH, 1, 2, true);
+          renderer.drawRoundedRect(x, y, hmCellW, hmCellH, 1, 2, true);
           break;
         case 2:
-          renderer.drawRoundedRect(x, y, cellW, cellH, 1, 2, true);
-          renderer.fillRectDither(x + 2, y + 2, cellW - 4, cellH - 4, Color::DarkGray);
+          renderer.drawRoundedRect(x, y, hmCellW, hmCellH, 1, 2, true);
+          renderer.fillRectDither(x + 2, y + 2, hmCellW - 4, hmCellH - 4, Color::DarkGray);
           break;
         default:
-          renderer.fillRoundedRect(x, y, cellW, cellH, 2, Color::Black);
+          renderer.fillRoundedRect(x, y, hmCellW, hmCellH, 2, Color::Black);
           break;
       }
     }

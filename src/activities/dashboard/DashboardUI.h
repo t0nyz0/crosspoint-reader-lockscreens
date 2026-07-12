@@ -19,6 +19,12 @@ int bigTextWidth(const char* text, int dot);
 // "3640" -> "3.6k" for values >= 1000 (hero-number display); small values pass through.
 void formatCompact(uint32_t n, char* out, size_t outLen);
 
+// One stat tile in the TRMNL grid style: a dithered accent bar on the left,
+// the value in the big dot-matrix font, and a small label beneath it. (x, y)
+// is the top-left of the value text; the accent bar sits just left of it.
+// Shared by every dashboard so landscape and portrait grids look identical.
+void drawStatTile(const GfxRenderer& renderer, int x, int y, const char* value, const char* label);
+
 // Function pointer to draw a small (~26px) footer brand mark at (x, y), top-left origin.
 using BrandIconFn = void (*)(const GfxRenderer& renderer, int x, int y);
 
