@@ -189,7 +189,12 @@ void syncClockAndTimezone() {
     }
   }
 
-  if (SETTINGS.clockUtcOffsetQ != 48) return;  // already detected or manually set
+  // Re-detect on EVERY poll (not once): the provider's offset already includes
+  // the current DST state, so refreshing each poll keeps the clock correct
+  // across the twice-yearly DST transitions instead of freezing at whatever
+  // offset happened to be detected first. A manual offset change turns
+  // clockTzAutoDetect off so the user's explicit choice is never overwritten.
+  if (!SETTINGS.clockTzAutoDetect) return;
 
   int offsetSeconds = 0;
   bool found = false;
@@ -225,9 +230,12 @@ void syncClockAndTimezone() {
     return;
   }
 
-  SETTINGS.clockUtcOffsetQ = static_cast<uint8_t>(48 + offsetSeconds / 900);
-  SETTINGS.saveToFile();
-  LOG_INF("DASH", "Timezone: UTC%+d min", offsetSeconds / 60);
+  const uint8_t detectedQ = static_cast<uint8_t>(48 + offsetSeconds / 900);
+  if (detectedQ != SETTINGS.clockUtcOffsetQ) {  // only write to SD when it actually changes
+    SETTINGS.clockUtcOffsetQ = detectedQ;
+    SETTINGS.saveToFile();
+    LOG_INF("DASH", "Timezone updated: UTC%+d min", offsetSeconds / 60);
+  }
 }
 
 void formatUpdatedStamp(char* buf, size_t bufLen) {

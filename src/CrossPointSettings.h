@@ -220,6 +220,11 @@ class CrossPointSettings {
   // Value 48 = UTC+0, 0 = UTC-12:00, 104 = UTC+14:00.
   // Quarter-hour granularity supports oddball zones like Nepal (+5:45) and Chatham (+12:45).
   uint8_t clockUtcOffsetQ = 48;
+  // When 1, the lock-screen dashboards re-detect clockUtcOffsetQ from the
+  // network on every poll (so it stays correct across DST transitions). A
+  // manual offset change (ClockOffsetActivity) sets this to 0 so the manual
+  // choice sticks. Default on: the reader otherwise defaults to UTC+0.
+  uint8_t clockTzAutoDetect = 1;
   // Clock display format: 0 = 24-hour, 1 = 12-hour
   uint8_t clockFormat = 0;
   // Set once an NTP sync succeeds. Used to skip re-syncing on every WiFi connect.

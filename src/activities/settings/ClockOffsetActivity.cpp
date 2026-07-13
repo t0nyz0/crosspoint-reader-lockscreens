@@ -64,8 +64,13 @@ void ClockOffsetActivity::loadFromSettings() {
 
 void ClockOffsetActivity::saveToSettings() const {
   const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
+  // onExit() calls this on any exit, so a no-op view/back must not change
+  // anything. Only an actual offset change is treated as a manual choice,
+  // which opts out of the lock-screen dashboards' automatic (DST-aware)
+  // timezone detection so the user's value sticks past the next poll.
   if (encoded == SETTINGS.clockUtcOffsetQ) return;
   SETTINGS.clockUtcOffsetQ = encoded;
+  SETTINGS.clockTzAutoDetect = 0;
   SETTINGS.saveToFile();
 }
 

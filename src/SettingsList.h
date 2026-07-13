@@ -276,6 +276,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           StrId::STR_CUSTOMISE_STATUS_BAR),
         SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
                            "clockUtcOffsetQ", StrId::STR_CUSTOMISE_STATUS_BAR),
+        SettingInfo::Toggle(StrId::STR_AUTO_TIMEZONE, &CrossPointSettings::clockTzAutoDetect, "clockTzAutoDetect",
+                            StrId::STR_CUSTOMISE_STATUS_BAR),
         SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
                           {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
                           StrId::STR_CUSTOMISE_STATUS_BAR),
