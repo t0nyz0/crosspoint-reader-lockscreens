@@ -75,20 +75,27 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   logSerial.end();
 #endif
 
-  // Pre-sleep routines from the original firmware
-  // GPIO13 is connected to battery latch MOSFET, we need to make sure it's low during sleep
-  // Note that this means the MCU will be completely powered off during sleep, including RTC
+  // GPIO13 is the battery-latch MOSFET. Driving it LOW fully powers the MCU
+  // off, which is ideal on battery (the power button is hard-wired to briefly
+  // re-power the MCU to wake it). But on USB, the cable keeps supplying power,
+  // so cutting the latch does NOT power off — instead the chip immediately
+  // re-powers into a POWERON boot, which setup() classifies as AfterUSBPower
+  // and tries to sleep again, producing an unrecoverable power-cut/re-power
+  // BOUNCE (and, because the power button is serviced in the main loop, a wedge
+  // there leaves the button dead). So on USB we keep GPIO13 HIGH and enter a
+  // real deep sleep with power stable — exactly what startTimedDeepSleep() does
+  // (proven to wake reliably) — and rely on the power-button GPIO wake.
+  const bool onUsb = gpio.isUsbConnected();
   constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
   gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_SPIWP, 0);
+  gpio_set_level(GPIO_SPIWP, onUsb ? 1 : 0);
   esp_sleep_config_gpio_isolate();
   gpio_deep_sleep_hold_en();
   gpio_hold_en(GPIO_SPIWP);
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
-  // Arm the wakeup trigger *after* the button is released
-  // Note: this is only useful for waking up on USB power. On battery, the MCU will be completely powered off, so the
-  // power button is hard-wired to briefly provide power to the MCU, waking it up regardless of the wakeup source
-  // configuration
+  // Arm the wakeup trigger *after* the button is released. On battery this is
+  // moot (MCU fully off, power button hard-wired to re-power); on USB this GPIO
+  // wake is what brings it back.
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   // Enter Deep Sleep
   esp_deep_sleep_start();
