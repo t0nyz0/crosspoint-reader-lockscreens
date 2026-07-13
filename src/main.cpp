@@ -321,6 +321,16 @@ void enterDashboardSleep(uint32_t seconds) {
 // the normal enterDeepSleep().
 bool enterLockScreenSleep() {
   if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LOCK_SCREEN) return false;
+  // Restore full CPU frequency before handing off. Auto-sleep fires after the
+  // idle loop has already dropped the CPU to LOW_POWER_FREQ (10 MHz), and the
+  // dashboard's very first act is to bring up WiFi (WiFi.mode(WIFI_STA)). The
+  // radio/PHY cannot initialize at 10 MHz -- WiFi.mode() then blocks forever,
+  // wedging the loop task (and with it the UI and power button) with no crash
+  // or coredump. The interactive/timer-wake entries escape this because a
+  // button press or a fresh boot already runs at full speed; only this
+  // idle-timeout handoff needs the restore. Once the dashboard is the current
+  // activity its preventAutoSleep() keeps the loop from re-lowering the clock.
+  powerManager.setPowerSaving(false);
   // Capture whether we were reading BEFORE the activity is replaced; this is
   // what routes a later (non-timer) power-button wake back to the book. The
   // dashboard sets APP_STATE.activeDashboardMode itself when it arms sleep.
