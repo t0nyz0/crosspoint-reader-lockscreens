@@ -39,6 +39,19 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+// The dashboard lock screens (GitHub/Weather/Tempest) run their network poll
+// directly on the Arduino loop task: syncClockAndTimezone() plus an HTTPS
+// fetch via HttpDownloader -> esp_http_client -> esp-tls -> mbedTLS. The
+// mbedTLS handshake is deeply stack-hungry, and on the RISC-V ESP32-C3 (more
+// register spilling than Xtensa) it overruns the stock 8 KB loop-task stack.
+// This manifested as a "stack overflow in task loopTask" panic that froze the
+// UI and killed the power button (the button is serviced from this same task).
+// Confirmed from the on-device coredump. 24 KB gives comfortable headroom over
+// the TLS + nested HTTP/JSON + HTML-parse peak while leaving ample heap for the
+// TLS session and framebuffers. (Base firmware also does HTTPS on this task --
+// OTA check, font/OPDS downloads -- so it benefits from the extra headroom too.)
+SET_LOOP_TASK_STACK_SIZE(24576);
+
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
 ActivityManager activityManager(renderer, mappedInputManager);
