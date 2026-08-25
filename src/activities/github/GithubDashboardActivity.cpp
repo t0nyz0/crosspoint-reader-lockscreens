@@ -163,7 +163,7 @@ void GithubDashboardActivity::startDirectWifiConnect() {
   }
 
   const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
-  const WifiCredential* cred = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
+  const std::optional<WifiCredential> cred = lastSsid.empty() ? std::nullopt : WIFI_STORE.findCredential(lastSsid);
   if (!cred) {
     LOG_ERR("GH", "No saved WiFi network for unattended refresh");
     state = State::Failed;

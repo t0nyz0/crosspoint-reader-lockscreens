@@ -1,8 +1,11 @@
 #include "HalPowerManager.h"
 
+#include <BoardConfig.h>
 #include <Logging.h>
+#include <PowerManager.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
+#include <soc/soc_caps.h>
 
 #include <cassert>
 
@@ -11,14 +14,8 @@
 HalPowerManager powerManager;  // Singleton instance
 
 void HalPowerManager::begin() {
-  if (gpio.deviceIsX3()) {
-    // X3 uses an I2C fuel gauge for battery monitoring.
-    // I2C init must come AFTER gpio.begin() so early hardware detection/probes are finished.
-    Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
-    Wire.setTimeOut(4);
-    _batteryUseI2C = true;
-  } else {
-    pinMode(BAT_GPIO0, INPUT);
+  if (BoardConfig::ACTIVE.batteryAdc >= 0) {
+    pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
@@ -61,12 +58,6 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
-  // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
-  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
-    delay(50);
-    gpio.update();
-  }
-
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
   // doesn't hold power domains that interfere with USB-powered GPIO wake.
@@ -75,30 +66,37 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   logSerial.end();
 #endif
 
-  // GPIO13 is the battery-latch MOSFET. Driving it LOW fully powers the MCU
-  // off, which is ideal on battery (the power button is hard-wired to briefly
-  // re-power the MCU to wake it). But on USB, the cable keeps supplying power,
-  // so cutting the latch does NOT power off — instead the chip immediately
-  // re-powers into a POWERON boot, which setup() classifies as AfterUSBPower
-  // and tries to sleep again, producing an unrecoverable power-cut/re-power
-  // BOUNCE (and, because the power button is serviced in the main loop, a wedge
-  // there leaves the button dead). So on USB we keep GPIO13 HIGH and enter a
-  // real deep sleep with power stable — exactly what startTimedDeepSleep() does
-  // (proven to wake reliably) — and rely on the power-button GPIO wake.
-  const bool onUsb = gpio.isUsbConnected();
-  constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-  gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_SPIWP, onUsb ? 1 : 0);
-  esp_sleep_config_gpio_isolate();
-  gpio_deep_sleep_hold_en();
-  gpio_hold_en(GPIO_SPIWP);
-  pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
-  // Arm the wakeup trigger *after* the button is released. On battery this is
-  // moot (MCU fully off, power button hard-wired to re-power); on USB this GPIO
-  // wake is what brings it back.
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
-  // Enter Deep Sleep
-  esp_deep_sleep_start();
+#if !SOC_PM_SUPPORT_EXT1_WAKEUP
+  if (gpio.isXteinkDevice() && !gpio.deviceIsX3()) {
+    // X4 GPIO13 is the battery-latch MOSFET. On battery, driving it LOW powers
+    // the MCU fully off (the power button is hard-wired to re-power it). But on
+    // USB the cable keeps supplying power, so cutting the latch does NOT power
+    // off -- the chip re-powers into a POWERON boot that setup() reads as
+    // AfterUSBPower and sleeps again: an unrecoverable bounce that wedges the
+    // device and its power button. So keep GPIO13 HIGH on USB (a real deep sleep
+    // with power stable, woken by the power button, like startTimedDeepSleep());
+    // drive it LOW only on battery. [Lock Screens fork: re-applied over the
+    // v1.5.0 SDK-delegating rewrite, which drove GPIO13 low unconditionally.]
+    const bool onUsb = gpio.isUsbConnected();
+    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
+    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_SPIWP, onUsb ? 1 : 0);
+    gpio_hold_en(GPIO_SPIWP);
+  }
+#endif
+
+  // Cut the gated peripheral rails (touch/SD/EPD on boards like the Sticky) and
+  // hold the enables off through deep sleep — otherwise the GT911 and SD card
+  // stay powered all through "off" and drain the battery. No-op on boards with
+  // no switched rails (X4/X3). Trade-off: no touch-to-wake; wake is the power
+  // button. Must run after display.deepSleep() so the panel controller gets its
+  // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
+  // guarantees that ordering).
+  freeink::PowerManager::powerDownRailsForSleep();
+
+  // Waits for the power button to be physically released (so holding it doesn't
+  // immediately wake the device again), then arms the wake source and sleeps.
+  freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
 void HalPowerManager::startTimedDeepSleep(HalGPIO& gpio, const uint64_t seconds) const {
@@ -127,33 +125,21 @@ void HalPowerManager::startTimedDeepSleep(HalGPIO& gpio, const uint64_t seconds)
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {
-  if (_batteryUseI2C) {
+  static const BatteryMonitor battery;
+  if (BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
     const unsigned long now = millis();
     if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
       return _batteryCachedPercent;
     }
 
-    // Read SOC directly from I2C fuel gauge (16-bit LE register).
-    // On I2C error, keep last known value to avoid UI jitter/slowdowns.
-    Wire.beginTransmission(I2C_ADDR_BQ27220);
-    Wire.write(BQ27220_SOC_REG);
-    if (Wire.endTransmission(false) != 0) {
-      _batteryLastPollMs = now;
-      return _batteryCachedPercent;
-    }
-    Wire.requestFrom(I2C_ADDR_BQ27220, (uint8_t)2);
-    if (Wire.available() < 2) {
-      _batteryLastPollMs = now;
-      return _batteryCachedPercent;
-    }
-    const uint8_t lo = Wire.read();
-    const uint8_t hi = Wire.read();
-    const uint16_t soc = (hi << 8) | lo;
-    _batteryCachedPercent = soc > 100 ? 100 : soc;
     _batteryLastPollMs = now;
+    uint16_t percent = 0;
+    if (!battery.readPercentageChecked(percent)) {
+      return _batteryCachedPercent;
+    }
+    _batteryCachedPercent = percent;
     return _batteryCachedPercent;
   }
-  static const BatteryMonitor battery = BatteryMonitor(BAT_GPIO0);
 
   // smooth the battery %.
   if (_batteryCachedPercent == 0) {
