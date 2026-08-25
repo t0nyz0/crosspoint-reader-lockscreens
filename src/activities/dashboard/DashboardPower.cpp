@@ -15,6 +15,7 @@ RTC_DATA_ATTR static uint32_t s_lastEpoch;        // wall-clock secs at the last
 RTC_DATA_ATTR static uint16_t s_lastPct;          // battery % at that point
 RTC_DATA_ATTR static float s_drainPctPerHour;     // smoothed discharge rate
 RTC_DATA_ATTR static bool s_haveHistory;          // a usable baseline exists
+RTC_DATA_ATTR static uint8_t s_rateSamples;       // # of measured drops folded in; >=2 => trustworthy
 
 namespace DashboardPower {
 
@@ -54,6 +55,7 @@ Status assess(uint32_t nextIntervalSeconds) {
     // cleanly after the next unplug.
     s_drainPctPerHour = 0.0f;
     s_haveHistory = false;
+    s_rateSamples = 0;
   } else if (clockValid) {
     const uint32_t nowS = static_cast<uint32_t>(now);
     if (!s_haveHistory || s_lastEpoch == 0 || nowS <= s_lastEpoch ||
@@ -73,6 +75,7 @@ Status assess(uint32_t nextIntervalSeconds) {
           s_drainPctPerHour = s_drainPctPerHour > 0.0f
                                   ? (s_drainPctPerHour * (1.0f - RATE_ALPHA) + rate * RATE_ALPHA)
                                   : rate;
+          if (s_rateSamples < 255) s_rateSamples++;
         }
         s_lastEpoch = nowS;
         s_lastPct = s.pct;
@@ -81,20 +84,24 @@ Status assess(uint32_t nextIntervalSeconds) {
     // s.pct == s_lastPct: keep the baseline and let time accumulate.
   }
 
-  if (!s.charging && s_drainPctPerHour > 0.0f) {
+  // A prediction is only trusted once at least two real drops have been measured
+  // (>=2 samples) -- a single noisy reading must never trigger a power-off.
+  if (!s.charging && s_drainPctPerHour > 0.0f && s_rateSamples >= 2) {
     s.predictionValid = true;
     s.drainPctPerHour = s_drainPctPerHour;
     s.hoursRemaining = static_cast<float>(s.pct) / s_drainPctPerHour;
   }
 
-  // Classify.
+  // Classify. CRITICAL_PCT is the hard floor. Above it, pause only if a trusted
+  // prediction says the pack won't survive the interval we'd ACTUALLY sleep --
+  // which, when Low, is the stretched interval (see adjustIntervalSeconds), not
+  // the base -- otherwise we could stretch into a sleep the battery can't finish.
+  const uint32_t sleepS = nextIntervalSeconds > LOW_MIN_INTERVAL_S ? nextIntervalSeconds : LOW_MIN_INTERVAL_S;
+  const bool wontSurvive =
+      s.predictionValid && s.hoursRemaining * 3600.0f < static_cast<float>(sleepS) * SURVIVAL_MARGIN;
   if (s.charging) {
     s.level = Level::Ok;
-  } else if (s.pct <= CRITICAL_PCT) {
-    s.level = Level::Critical;
-  } else if (s.predictionValid &&
-             s.hoursRemaining * 3600.0f < static_cast<float>(nextIntervalSeconds) * SURVIVAL_MARGIN) {
-    // Won't reliably survive to the next poll -- pause now, while charge remains.
+  } else if (s.pct <= CRITICAL_PCT || wontSurvive) {
     s.level = Level::Critical;
   } else if (s.pct <= LOW_PCT) {
     s.level = Level::Low;

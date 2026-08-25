@@ -586,18 +586,19 @@ void TempestDashboardActivity::renderDashboard(const char* footerStatusOverride,
   snprintf(battLine, sizeof(battLine), "%.2fV", stationBatteryV);
   // A transient status ("waiting for Tempest...") takes the updated slot;
   // otherwise a low reader battery shows a warning there, else the updated time.
-  const char* updPrefix;
-  const char* updValue = lastUpdated;
+  const char* updPrefix = "";
+  const char* updValue = "";
   char battWarn[48];
   if (footerStatusOverride) {
     updPrefix = footerStatusOverride;
+    updValue = lastUpdated;
   } else if (autoRefresh && battery_.level == DashboardPower::Level::Low) {
     DashboardUI::formatBatteryWarning(battWarn, sizeof(battWarn), battery_.pct, battery_.predictionValid,
                                       battery_.hoursRemaining);
-    updPrefix = battWarn;
-    updValue = "";
-  } else {
+    updPrefix = battWarn;  // shown alone (empty value) via composeFooterStatus
+  } else if (lastUpdated[0] != '\0') {
     updPrefix = tr(STR_DASHBOARD_UPDATED);
+    updValue = lastUpdated;
   }
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawTempestBrandIcon, label,
                           updPrefix, updValue, battLine);

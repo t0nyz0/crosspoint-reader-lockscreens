@@ -127,6 +127,27 @@ void drawStatTile(const GfxRenderer& renderer, int x, int y, const char* value, 
   renderer.drawText(UI_10_FONT_ID, x, y + 40, label);
 }
 
+namespace {
+// Compose the footer status line from an optional prefix + optional value.
+// Returns false (draw nothing) only when BOTH are empty -- so a caller can pass
+// just a prefix (e.g. a low-battery warning) with an empty value and still have
+// it rendered, while an empty prefix+value (clock never synced) draws nothing.
+bool composeFooterStatus(char* buf, size_t bufLen, const char* prefix, const char* value) {
+  const bool hasP = prefix && prefix[0] != '\0';
+  const bool hasV = value && value[0] != '\0';
+  if (hasP && hasV) {
+    snprintf(buf, bufLen, "%s %s", prefix, value);
+  } else if (hasP) {
+    snprintf(buf, bufLen, "%s", prefix);
+  } else if (hasV) {
+    snprintf(buf, bufLen, "%s", value);
+  } else {
+    return false;
+  }
+  return true;
+}
+}  // namespace
+
 void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pageWidth, int pageHeight,
                 int sideMargin, BrandIconFn drawIcon, const char* brandLabel, const char* updatedPrefix,
                 const char* lastUpdated, const char* identity) {
@@ -147,10 +168,9 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
     renderer.drawText(UI_10_FONT_ID, sideMargin + 38, row1Y, brandLabel, true, EpdFontFamily::BOLD);
     GUI.drawBatteryRight(renderer, Rect{battX, row1Y + 2, metrics.batteryWidth, metrics.batteryHeight}, true);
 
-    // Row 2: updated stamp (left), identity (right)
-    if (lastUpdated && lastUpdated[0] != '\0') {
-      char line[48];
-      snprintf(line, sizeof(line), "%s %s", updatedPrefix, lastUpdated);
+    // Row 2: updated stamp / status (left), identity (right)
+    char line[48];
+    if (composeFooterStatus(line, sizeof(line), updatedPrefix, lastUpdated)) {
       renderer.drawText(SMALL_FONT_ID, sideMargin, row2Y, line);
     }
     if (identity && identity[0] != '\0') {
@@ -167,9 +187,8 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
   if (drawIcon) drawIcon(renderer, sideMargin, sepY + 15);
   renderer.drawText(UI_10_FONT_ID, sideMargin + 38, footerTextY, brandLabel, true, EpdFontFamily::BOLD);
 
-  if (lastUpdated && lastUpdated[0] != '\0') {
-    char line[48];
-    snprintf(line, sizeof(line), "%s %s", updatedPrefix, lastUpdated);
+  char line[48];
+  if (composeFooterStatus(line, sizeof(line), updatedPrefix, lastUpdated)) {
     renderer.drawCenteredText(UI_10_FONT_ID, footerTextY, line);
   }
 

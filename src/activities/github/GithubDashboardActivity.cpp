@@ -628,14 +628,16 @@ void GithubDashboardActivity::renderDashboard() const {
 
   // --- Footer bar: GitHub branding, updated time (or low-battery warning),
   // username + battery ---
-  const char* updPrefix = tr(STR_DASHBOARD_UPDATED);
-  const char* updValue = lastUpdated;
+  const char* updPrefix = "";
+  const char* updValue = "";
   char battWarn[48];
   if (autoRefresh && battery_.level == DashboardPower::Level::Low) {
     DashboardUI::formatBatteryWarning(battWarn, sizeof(battWarn), battery_.pct, battery_.predictionValid,
                                       battery_.hoursRemaining);
-    updPrefix = battWarn;
-    updValue = "";
+    updPrefix = battWarn;  // shown alone (empty value) via composeFooterStatus
+  } else if (lastUpdated[0] != '\0') {
+    updPrefix = tr(STR_DASHBOARD_UPDATED);
+    updValue = lastUpdated;
   }
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawGithubBrandIcon, "GitHub",
                           updPrefix, updValue, SETTINGS.githubUsername);
