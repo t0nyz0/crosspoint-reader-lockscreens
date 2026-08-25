@@ -20,6 +20,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "activities/dashboard/DashboardPower.h"
 #include "activities/dashboard/DashboardUI.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -113,6 +114,19 @@ void GithubDashboardActivity::beginUpdate() {
   state = State::Connecting;
   errorMessage = nullptr;
   sleepAt = 0;
+
+  if (autoRefresh) {
+    // Assess the battery UN-LOADED, before WiFi comes up. If it's too low to
+    // safely keep polling, show a persistent "charge me" frame and power fully
+    // off instead of draining the pack to death mid-fetch.
+    battery_ = DashboardPower::assess(SETTINGS.githubRefreshMinutes * 60u);
+    if (battery_.level == DashboardPower::Level::Critical) {
+      state = State::Failed;
+      errorMessage = tr(STR_DASHBOARD_BATTERY_PAUSED);
+      requestUpdateAndWait();
+      enterDashboardPowerOff();  // does not return
+    }
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
     state = State::Fetching;
@@ -398,7 +412,8 @@ void GithubDashboardActivity::scanForTotal() {
 void GithubDashboardActivity::goToSleepAndPoll() {
   APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_GITHUB;
   APP_STATE.saveToFile();
-  const uint32_t intervalS = SETTINGS.githubRefreshMinutes * 60u;
+  uint32_t intervalS = SETTINGS.githubRefreshMinutes * 60u;
+  intervalS = DashboardPower::adjustIntervalSeconds(intervalS, battery_);  // stretch when low
   LOG_INF("GH", "Dashboard armed, sleeping for %u s", (unsigned)intervalS);
   enterDashboardSleep(intervalS);  // does not return
 }
@@ -611,9 +626,19 @@ void GithubDashboardActivity::renderDashboard() const {
     }
   }
 
-  // --- Footer bar: GitHub branding, updated time, username + battery ---
+  // --- Footer bar: GitHub branding, updated time (or low-battery warning),
+  // username + battery ---
+  const char* updPrefix = tr(STR_DASHBOARD_UPDATED);
+  const char* updValue = lastUpdated;
+  char battWarn[48];
+  if (autoRefresh && battery_.level == DashboardPower::Level::Low) {
+    DashboardUI::formatBatteryWarning(battWarn, sizeof(battWarn), battery_.pct, battery_.predictionValid,
+                                      battery_.hoursRemaining);
+    updPrefix = battWarn;
+    updValue = "";
+  }
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawGithubBrandIcon, "GitHub",
-                          tr(STR_DASHBOARD_UPDATED), lastUpdated, SETTINGS.githubUsername);
+                          updPrefix, updValue, SETTINGS.githubUsername);
 
   // Full refresh: this frame stays on the panel for the whole sleep hour.
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);

@@ -17,6 +17,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "activities/dashboard/DashboardPower.h"
 #include "activities/dashboard/DashboardUI.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -99,6 +100,18 @@ void WeatherDashboardActivity::beginUpdate() {
   state = State::Connecting;
   errorMessage = nullptr;
   sleepAt = 0;
+
+  if (autoRefresh) {
+    // Assess the battery un-loaded, before WiFi. Pause into a persistent
+    // "charge me" frame if too low to keep polling safely.
+    battery_ = DashboardPower::assess(SETTINGS.weatherRefreshMinutes * 60u);
+    if (battery_.level == DashboardPower::Level::Critical) {
+      state = State::Failed;
+      errorMessage = tr(STR_DASHBOARD_BATTERY_PAUSED);
+      requestUpdateAndWait();
+      enterDashboardPowerOff();  // does not return
+    }
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
     state = State::Fetching;
@@ -317,7 +330,8 @@ void WeatherDashboardActivity::runFetch() {
 void WeatherDashboardActivity::goToSleepAndPoll() {
   APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_WEATHER;
   APP_STATE.saveToFile();
-  const uint32_t intervalS = SETTINGS.weatherRefreshMinutes * 60u;
+  uint32_t intervalS = SETTINGS.weatherRefreshMinutes * 60u;
+  intervalS = DashboardPower::adjustIntervalSeconds(intervalS, battery_);  // stretch when low
   LOG_INF("WX", "Dashboard armed, sleeping for %u s", (unsigned)intervalS);
   enterDashboardSleep(intervalS);
 }
@@ -451,10 +465,18 @@ void WeatherDashboardActivity::renderDashboard() const {
     }
   }
 
-  // --- Footer bar ---
+  // --- Footer bar (updated time, or a low-battery warning in its place) ---
+  const char* updPrefix = tr(STR_DASHBOARD_UPDATED);
+  const char* updValue = lastUpdated;
+  char battWarn[48];
+  if (autoRefresh && battery_.level == DashboardPower::Level::Low) {
+    DashboardUI::formatBatteryWarning(battWarn, sizeof(battWarn), battery_.pct, battery_.predictionValid,
+                                      battery_.hoursRemaining);
+    updPrefix = battWarn;
+    updValue = "";
+  }
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawWeatherBrandIcon,
-                          tr(STR_WEATHER_DASHBOARD), tr(STR_DASHBOARD_UPDATED), lastUpdated,
-                          SETTINGS.weatherPlaceName);
+                          tr(STR_WEATHER_DASHBOARD), updPrefix, updValue, SETTINGS.weatherPlaceName);
 
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   renderer.setOrientation(origOrientation);

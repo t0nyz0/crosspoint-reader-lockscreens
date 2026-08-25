@@ -2,6 +2,7 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "activities/dashboard/DashboardPower.h"
 
 // General weather dashboard (Open-Meteo, free/no API key). Shows current
 // conditions + a short forecast for a US ZIP code, TRMNL-style, then arms a
@@ -38,6 +39,10 @@ class WeatherDashboardActivity final : public Activity {
   unsigned long wifiConnectStart = 0;
   unsigned long sleepAt = 0;
   const char* errorMessage = nullptr;
+
+  // Battery/runtime assessment for this unattended poll (autoRefresh only),
+  // taken in beginUpdate() before WiFi comes up.
+  DashboardPower::Status battery_;
 
   // Current conditions
   int currentTempF = 0;

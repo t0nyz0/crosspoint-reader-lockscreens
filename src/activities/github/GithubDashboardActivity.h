@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "activities/dashboard/DashboardPower.h"
 
 // GitHub contribution dashboard. Shows the profile contribution heatmap
 // (like the graph on a GitHub profile page), then arms a timed deep sleep and
@@ -42,6 +43,11 @@ class GithubDashboardActivity final : public Activity {
   unsigned long wifiConnectStart = 0;
   unsigned long sleepAt = 0;  // 0 = sleep not armed
   const char* errorMessage = nullptr;
+
+  // Battery/runtime assessment for this unattended poll (autoRefresh only),
+  // taken in beginUpdate() before WiFi comes up. Drives the low-battery warning,
+  // interval stretching, and the critical-charge pause.
+  DashboardPower::Status battery_;
 
   // 54 week columns x 7 rows covers any contribution calendar
   static constexpr size_t MAX_SLOTS = 384;

@@ -310,6 +310,30 @@ void enterDashboardSleep(uint32_t seconds) {
   abort();  // unreachable: startTimedDeepSleep does not return
 }
 
+// True power-off for a polling dashboard whose battery is too low to keep
+// polling safely. Unlike enterDashboardSleep() there is NO RTC timer: the
+// device fully powers down (GPIO13 latch low on battery) and only a power-button
+// press (or USB) brings it back. The caller renders a "low battery" frame first;
+// e-ink retains that image with zero draw, so the warning stays visible while
+// the device is off -- stopping the drain-to-death instead of dying mid-fetch.
+void enterDashboardPowerOff() {
+  HalPowerManager::Lock powerLock;
+  deepSleepInProgress = true;
+  APP_STATE.saveToFile();
+
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+
+  halTiltSensor.deepSleep();
+  display.deepSleep();
+  LOG_INF("MAIN", "Low battery: dashboard paused, powering off");
+
+  powerManager.startDeepSleep(gpio);
+  abort();  // unreachable: startDeepSleep does not return
+}
+
 // "Sleep Screen = Lock Screen" behavior: instead of drawing a static sleep
 // image and hard-powering off, hand off to the configured lock-screen
 // dashboard in unattended mode. It connects, fetches, renders, then arms its

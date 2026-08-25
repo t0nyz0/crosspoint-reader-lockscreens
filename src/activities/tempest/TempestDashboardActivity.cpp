@@ -18,6 +18,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "activities/dashboard/DashboardPower.h"
 #include "activities/dashboard/DashboardUI.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -98,6 +99,19 @@ void TempestDashboardActivity::beginUpdate() {
   state = State::Connecting;
   errorMessage = nullptr;
   sleepAt = 0;
+
+  if (autoRefresh) {
+    // Assess the battery un-loaded, before WiFi. Tempest has the highest duty
+    // cycle (radio on ~65s every few minutes), so pause into a persistent
+    // "charge me" frame if too low to keep polling safely.
+    battery_ = DashboardPower::assess(SETTINGS.tempestRefreshMinutes * 60u);
+    if (battery_.level == DashboardPower::Level::Critical) {
+      state = State::Failed;
+      errorMessage = tr(STR_DASHBOARD_BATTERY_PAUSED);
+      requestUpdateAndWait();
+      enterDashboardPowerOff();  // does not return
+    }
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
     state = State::Fetching;
@@ -377,7 +391,8 @@ void TempestDashboardActivity::runFetch() {
 void TempestDashboardActivity::goToSleepAndPoll() {
   APP_STATE.activeDashboardMode = CrossPointState::DASHBOARD_TEMPEST;
   APP_STATE.saveToFile();
-  const uint32_t intervalS = SETTINGS.tempestRefreshMinutes * 60u;
+  uint32_t intervalS = SETTINGS.tempestRefreshMinutes * 60u;
+  intervalS = DashboardPower::adjustIntervalSeconds(intervalS, battery_);  // stretch when low
   LOG_INF("TMP", "Dashboard armed, sleeping for %u s", (unsigned)intervalS);
   enterDashboardSleep(intervalS);
 }
@@ -569,9 +584,23 @@ void TempestDashboardActivity::renderDashboard(const char* footerStatusOverride,
   // --- Footer bar: station battery takes the "identity" slot ---
   char battLine[24];
   snprintf(battLine, sizeof(battLine), "%.2fV", stationBatteryV);
+  // A transient status ("waiting for Tempest...") takes the updated slot;
+  // otherwise a low reader battery shows a warning there, else the updated time.
+  const char* updPrefix;
+  const char* updValue = lastUpdated;
+  char battWarn[48];
+  if (footerStatusOverride) {
+    updPrefix = footerStatusOverride;
+  } else if (autoRefresh && battery_.level == DashboardPower::Level::Low) {
+    DashboardUI::formatBatteryWarning(battWarn, sizeof(battWarn), battery_.pct, battery_.predictionValid,
+                                      battery_.hoursRemaining);
+    updPrefix = battWarn;
+    updValue = "";
+  } else {
+    updPrefix = tr(STR_DASHBOARD_UPDATED);
+  }
   DashboardUI::drawFooter(renderer, metrics, pageWidth, pageHeight, sideMargin, drawTempestBrandIcon, label,
-                          footerStatusOverride ? footerStatusOverride : tr(STR_DASHBOARD_UPDATED), lastUpdated,
-                          battLine);
+                          updPrefix, updValue, battLine);
 
   // A fresh reading gets a full refresh (this frame stays up for the whole
   // sleep interval, so it's worth the flash to avoid ghosting). A transient

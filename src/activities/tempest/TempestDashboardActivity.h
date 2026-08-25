@@ -2,6 +2,7 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "activities/dashboard/DashboardPower.h"
 #include "activities/dashboard/DashboardUI.h"
 
 // Local WeatherFlow Tempest station dashboard. Listens for the station's
@@ -38,6 +39,10 @@ class TempestDashboardActivity final : public Activity {
   unsigned long wifiConnectStart = 0;
   unsigned long sleepAt = 0;
   const char* errorMessage = nullptr;
+
+  // Battery/runtime assessment for this unattended poll (autoRefresh only),
+  // taken in beginUpdate() before WiFi comes up.
+  DashboardPower::Status battery_;
 
   // Latest observation (obs_st), converted to US units
   float tempF = 0;

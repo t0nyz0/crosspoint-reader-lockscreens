@@ -35,6 +35,13 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
                 int sideMargin, BrandIconFn drawIcon, const char* brandLabel, const char* updatedPrefix,
                 const char* lastUpdated, const char* identity);
 
+// Build the low-battery footer status line, e.g. "Battery low 14% ~9h" (or
+// "~3d" for multi-day, or just "Battery low 14%" when no runtime prediction is
+// available yet). Written into `buf` for use as the footer's updated-prefix slot
+// when the dashboard is running low, so the warning reuses the existing footer
+// text without extra layout. The label is localized.
+void formatBatteryWarning(char* buf, size_t bufLen, uint8_t pct, bool predictionValid, float hoursRemaining);
+
 // Sync the ESP32 internal clock via SNTP (only if not already set) and
 // auto-detect the local UTC offset from the connection's IP (only if the
 // clock offset is still the UTC+0 default). Safe to call on every poll; the

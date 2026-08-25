@@ -405,6 +405,8 @@ STR_GITHUB_CHANGE_USER: "Change User"
 
 STR_DASHBOARD_UPDATED: "Updated"
 STR_DASHBOARD_WIFI_FAILED: "WiFi connection failed"
+STR_DASHBOARD_BATTERY_LOW: "Battery low"
+STR_DASHBOARD_BATTERY_PAUSED: "Low battery - charge to resume"
 STR_GITHUB_REFRESH_INTERVAL: "GitHub Refresh Interval"
 STR_WEATHER_REFRESH_INTERVAL: "Weather Refresh Interval"
 STR_TEMPEST_REFRESH_INTERVAL: "Tempest Refresh Interval"

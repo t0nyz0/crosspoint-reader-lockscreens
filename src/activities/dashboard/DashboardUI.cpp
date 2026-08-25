@@ -81,6 +81,19 @@ void formatCompact(uint32_t n, char* out, size_t outLen) {
   }
 }
 
+void formatBatteryWarning(char* buf, size_t bufLen, uint8_t pct, bool predictionValid, float hoursRemaining) {
+  const char* label = tr(STR_DASHBOARD_BATTERY_LOW);
+  if (predictionValid && hoursRemaining > 0.0f) {
+    if (hoursRemaining >= 48.0f) {
+      snprintf(buf, bufLen, "%s %u%% ~%dd", label, (unsigned)pct, (int)(hoursRemaining / 24.0f + 0.5f));
+    } else {
+      snprintf(buf, bufLen, "%s %u%% ~%dh", label, (unsigned)pct, (int)(hoursRemaining + 0.5f));
+    }
+  } else {
+    snprintf(buf, bufLen, "%s %u%%", label, (unsigned)pct);
+  }
+}
+
 int bigTextWidth(const char* text, int dot) {
   int w = 0;
   for (const char* p = text; *p; p++) {
