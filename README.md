@@ -6,7 +6,7 @@
 
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
-![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
+![GitHub contribution dashboard running live on an Xteink device](./docs/images/github-dashboard-live.jpg)
 
 ## What this fork adds: Lock Screens
 
