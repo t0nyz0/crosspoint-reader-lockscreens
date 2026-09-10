@@ -163,10 +163,16 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
     const int row1Y = sepY + 14;
     const int row2Y = sepY + 44;
 
-    // Row 1: brand (left), battery + % (right)
+    // Row 1: brand (left), battery + % (right). drawBatteryLeft puts the % to
+    // the right of the icon, so draw the % ourselves to the left to keep the
+    // "NN% [icon]" right-aligned look (1.6.0 removed drawBatteryRight).
     if (drawIcon) drawIcon(renderer, sideMargin, sepY + 11);
     renderer.drawText(UI_10_FONT_ID, sideMargin + 38, row1Y, brandLabel, true, EpdFontFamily::BOLD);
-    GUI.drawBatteryRight(renderer, Rect{battX, row1Y + 2, metrics.batteryWidth, metrics.batteryHeight}, true);
+    char pctText[8];
+    snprintf(pctText, sizeof(pctText), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
+    const int pctW = renderer.getTextWidth(SMALL_FONT_ID, pctText);
+    renderer.drawText(SMALL_FONT_ID, battX - pctW - 4, row1Y, pctText);
+    GUI.drawBatteryLeft(renderer, Rect{battX, row1Y + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
 
     // Row 2: updated stamp / status (left), identity (right)
     char line[48];
@@ -193,9 +199,9 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
   }
 
   // Battery icon + explicit "NN%" (a bare icon glyph is hard to read at a
-  // glance on e-ink) -- drawBatteryRight puts the icon on the right and the
-  // percentage just to its left, so the identity text only needs to clear
-  // the percentage label, not guess where the icon starts.
+  // glance on e-ink). The icon sits at battX (right); draw the % just to its
+  // left so the identity text only needs to clear the percentage label.
+  // (1.6.0 removed drawBatteryRight, whose % was left of the icon.)
   char pctText[8];
   snprintf(pctText, sizeof(pctText), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
   const int pctTextW = renderer.getTextWidth(SMALL_FONT_ID, pctText);
@@ -205,7 +211,8 @@ void drawFooter(const GfxRenderer& renderer, const ThemeMetrics& metrics, int pa
     const int identityW = renderer.getTextWidth(UI_10_FONT_ID, identity);
     renderer.drawText(UI_10_FONT_ID, identityRightEdge - identityW, footerTextY, identity);
   }
-  GUI.drawBatteryRight(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, true);
+  renderer.drawText(SMALL_FONT_ID, battX - pctTextW - 4, footerTextY, pctText);
+  GUI.drawBatteryLeft(renderer, Rect{battX, footerTextY + 2, metrics.batteryWidth, metrics.batteryHeight}, false);
 }
 
 void syncClockAndTimezone() {

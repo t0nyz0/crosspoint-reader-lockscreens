@@ -11,7 +11,16 @@
 
 #include "HalGPIO.h"
 
+#if FREEINK_DEVICE_PAPERMONO
+#include <M5Pm1.h>
+#endif
+
 HalPowerManager powerManager;  // Singleton instance
+
+// GPIO13 controls the X4 battery latch and the X3 SD power rail on the C3
+// Xteink boards. Other boards use it for unrelated signals, including the
+// X4 Pro display chip select.
+static constexpr gpio_num_t XTEINK_C3_GPIO13 = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
   if (BoardConfig::ACTIVE.batteryAdc >= 0) {
@@ -67,23 +76,45 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 #endif
 
 #if !SOC_PM_SUPPORT_EXT1_WAKEUP
-  if (gpio.isXteinkDevice() && !gpio.deviceIsX3()) {
-    // X4 GPIO13 is the battery-latch MOSFET. On battery, driving it LOW powers
-    // the MCU fully off (the power button is hard-wired to re-power it). But on
-    // USB the cable keeps supplying power, so cutting the latch does NOT power
-    // off -- the chip re-powers into a POWERON boot that setup() reads as
+  if (gpio.isXteinkDevice()) {
+    // GPIO13 gates the battery MOSFET on both Xteink C3 boards. On battery,
+    // driving it LOW powers the MCU fully off (the power button re-powers it).
+    // But on USB the cable keeps supplying power, so cutting the latch does NOT
+    // power off -- the chip re-powers into a POWERON boot that setup() reads as
     // AfterUSBPower and sleeps again: an unrecoverable bounce that wedges the
     // device and its power button. So keep GPIO13 HIGH on USB (a real deep sleep
     // with power stable, woken by the power button, like startTimedDeepSleep());
-    // drive it LOW only on battery. [Lock Screens fork: re-applied over the
-    // v1.5.0 SDK-delegating rewrite, which drove GPIO13 low unconditionally.]
+    // drive it LOW only on battery. [Lock Screens fork.]
+    // Release any surviving pad hold first: hold_en survives deep sleep via the
+    // SDK's deepSleep(), and a held pad silently ignores the drive.
     const bool onUsb = gpio.isUsbConnected();
-    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_SPIWP, onUsb ? 1 : 0);
-    gpio_hold_en(GPIO_SPIWP);
+    gpio_hold_dis(XTEINK_C3_GPIO13);
+    gpio_set_direction(XTEINK_C3_GPIO13, GPIO_MODE_OUTPUT);
+    gpio_set_level(XTEINK_C3_GPIO13, onUsb ? 1 : 0);
+    gpio_hold_en(XTEINK_C3_GPIO13);
   }
 #endif
+
+  // Hold every configured power-latch pin HIGH through deep sleep. These are
+  // keep-alive enables (the X4 Pro's master peripheral rail on GPIO1, the
+  // Sticky's PWR_HOLD/PWR_LOCK): deepSleep() isolates all pads
+  // (esp_sleep_config_gpio_isolate), so a latch without an armed hold loses its
+  // output driver and floats — on the X4 Pro the latch drops as soon as
+  // external power leaves (serial/pogo adapter unplugged), and the next power-
+  // button press cold-boots instead of fast-waking. holdPowerRails() asserted
+  // the latches at boot but arms no sleep hold; arm it here instead. Skips
+  // XTEINK_C3_GPIO13: it IS power.latch0 on the C3 Xteink boards, where the
+  // block above drives it LOW on purpose (battery power-off).
+  for (const int8_t pin : {BoardConfig::ACTIVE.power.latch0, BoardConfig::ACTIVE.power.latch1}) {
+    if (pin < 0 || static_cast<gpio_num_t>(pin) == XTEINK_C3_GPIO13) continue;
+    const auto g = static_cast<gpio_num_t>(pin);
+    // Release any surviving pad hold first: a held pad silently ignores the
+    // drive below (same trap as the GPIO13 block above).
+    gpio_hold_dis(g);
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, HIGH);
+    gpio_hold_en(g);
+  }
 
   // Cut the gated peripheral rails (touch/SD/EPD on boards like the Sticky) and
   // hold the enables off through deep sleep — otherwise the GT911 and SD card
@@ -93,6 +124,15 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
   // guarantees that ordering).
   freeink::PowerManager::powerDownRailsForSleep();
+
+#if FREEINK_DEVICE_PAPERMONO
+  // Its power button is behind the M5PM1 PMIC rather than an ESP GPIO, so
+  // normal GPIO deep sleep would have no wake source. Ask the PMIC to shut the
+  // device down; a button click then restarts it through a cold boot.
+  if (freeink::m5pm1::requestShutdown()) {
+    delay(1000);  // allow the PMIC firmware time to drop power
+  }
+#endif
 
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
@@ -111,17 +151,16 @@ void HalPowerManager::startTimedDeepSleep(HalGPIO& gpio, const uint64_t seconds)
 #endif
 
 #if !SOC_PM_SUPPORT_EXT1_WAKEUP
-  if (gpio.isXteinkDevice() && !gpio.deviceIsX3()) {
-    // X4 GPIO13 = battery-latch MOSFET: keep it HIGH so the board stays powered
-    // (MCU in deep sleep) and the RTC timer can fire for the next poll. On X3,
-    // GPIO13 is instead the SD-card power switch, NOT a latch -- so do NOT drive
-    // it here; leave it to powerDownRailsForSleep() below, which drives it to the
-    // OFF level. (The old code drove GPIO13 HIGH unconditionally, which on X3 kept
-    // the SD card powered through the whole poll interval and wasted battery.)
-    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_SPIWP, 1);
-    gpio_hold_en(GPIO_SPIWP);
+  if (gpio.isXteinkDevice()) {
+    // GPIO13 is the battery-latch MOSFET (power.latch0) on both Xteink C3 boards.
+    // Unlike startDeepSleep() (which drives it LOW to power off), the timed
+    // dashboard sleep must keep it HIGH so the board stays powered (MCU in deep
+    // sleep) and the RTC timer can fire for the next poll. Release any surviving
+    // pad hold first, since a held pad ignores the drive. [Lock Screens fork.]
+    gpio_hold_dis(XTEINK_C3_GPIO13);
+    gpio_set_direction(XTEINK_C3_GPIO13, GPIO_MODE_OUTPUT);
+    gpio_set_level(XTEINK_C3_GPIO13, 1);
+    gpio_hold_en(XTEINK_C3_GPIO13);
   }
 #endif
 
