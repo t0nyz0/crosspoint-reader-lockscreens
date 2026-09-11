@@ -10,8 +10,11 @@
 // System > Weather Refresh Interval; default 30 min).
 class WeatherDashboardActivity final : public Activity {
  public:
-  explicit WeatherDashboardActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoRefresh = false)
-      : Activity("WeatherDashboard", renderer, mappedInput), autoRefresh(autoRefresh) {}
+  explicit WeatherDashboardActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoRefresh = false,
+                                    bool showConnectingFrame = false)
+      : Activity("WeatherDashboard", renderer, mappedInput),
+        autoRefresh(autoRefresh),
+        showConnectingFrame(showConnectingFrame) {}
 
   void onEnter() override;
   void onExit() override;
@@ -34,6 +37,12 @@ class WeatherDashboardActivity final : public Activity {
   static constexpr int MAX_FORECAST_DAYS = 5;
 
   const bool autoRefresh;
+  // Paint the "connecting" status frame on entry. Set for the interactive
+  // hand-off into lock-screen sleep (the user just locked the device and is
+  // watching), so the multi-second WiFi connect + fetch isn't a silent freeze
+  // on the previous screen. Left false for unattended timer re-wakes, which
+  // deliberately keep the last dashboard frame on the panel (no hourly flash).
+  const bool showConnectingFrame;
   State state = State::Connecting;
   bool wifiUsed = false;
   unsigned long wifiConnectStart = 0;

@@ -100,6 +100,10 @@ void TempestDashboardActivity::beginUpdate() {
   errorMessage = nullptr;
   sleepAt = 0;
 
+  // Interactive hand-off: paint a connecting frame now so the WiFi connect +
+  // fetch isn't a silent freeze on the previous screen (see showConnectingFrame).
+  if (showConnectingFrame) requestUpdate();
+
   if (autoRefresh) {
     // Assess the battery un-loaded, before WiFi. Tempest has the highest duty
     // cycle (radio on ~65s every few minutes), so pause into a persistent

@@ -101,6 +101,10 @@ void WeatherDashboardActivity::beginUpdate() {
   errorMessage = nullptr;
   sleepAt = 0;
 
+  // Interactive hand-off: paint a connecting frame now so the WiFi connect +
+  // fetch isn't a silent freeze on the previous screen (see showConnectingFrame).
+  if (showConnectingFrame) requestUpdate();
+
   if (autoRefresh) {
     // Assess the battery un-loaded, before WiFi. Pause into a persistent
     // "charge me" frame if too low to keep polling safely.

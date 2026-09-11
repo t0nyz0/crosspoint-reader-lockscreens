@@ -285,13 +285,16 @@ void ActivityManager::goToLockScreens() {
 void ActivityManager::goToLockScreenDashboard() {
   switch (SETTINGS.sleepLockScreenType) {
     case CrossPointSettings::SLEEP_LOCK_WEATHER:
-      replaceActivity(std::make_unique<WeatherDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      replaceActivity(std::make_unique<WeatherDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true,
+                                                                 /*showConnectingFrame=*/true));
       break;
     case CrossPointSettings::SLEEP_LOCK_TEMPEST:
-      replaceActivity(std::make_unique<TempestDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      replaceActivity(std::make_unique<TempestDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true,
+                                                                 /*showConnectingFrame=*/true));
       break;
     default:
-      replaceActivity(std::make_unique<GithubDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true));
+      replaceActivity(std::make_unique<GithubDashboardActivity>(renderer, mappedInput, /*autoRefresh=*/true,
+                                                                /*showConnectingFrame=*/true));
       break;
   }
 }

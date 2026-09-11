@@ -115,6 +115,10 @@ void GithubDashboardActivity::beginUpdate() {
   errorMessage = nullptr;
   sleepAt = 0;
 
+  // Interactive hand-off: paint a connecting frame now so the WiFi connect +
+  // fetch isn't a silent freeze on the previous screen (see showConnectingFrame).
+  if (showConnectingFrame) requestUpdate();
+
   if (autoRefresh) {
     // Assess the battery UN-LOADED, before WiFi comes up. If it's too low to
     // safely keep polling, show a persistent "charge me" frame and power fully
