@@ -21,8 +21,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     COVER_CUSTOM = 4,
     BLANK = 5,
     QUICK_RESUME = 6,
-    TRANSPARENT_CUSTOM = 7,
-    LOCK_SCREEN = 8,  // sleep into a lock-screen dashboard (see sleepLockScreenType) [Lock Screens fork]
+    // [Lock Screens fork] LOCK_SCREEN keeps ordinal 7 — it shipped at 7 in
+    // v1.5.0-lockscreens.1 and this value is persisted by ordinal, so moving it
+    // would silently remap every existing user's saved "Lock Screen" sleep mode.
+    // Upstream's new TRANSPARENT_CUSTOM (never shipped on this fork) takes 8.
+    LOCK_SCREEN = 7,  // sleep into a lock-screen dashboard (see sleepLockScreenType) [Lock Screens fork]
+    TRANSPARENT_CUSTOM = 8,
     SLEEP_SCREEN_MODE_COUNT
     // NOTE: values are persisted by ordinal and the SettingsList picker maps
     // array position -> stored value directly, so only ever APPEND here.
