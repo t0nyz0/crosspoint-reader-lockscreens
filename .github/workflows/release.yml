@@ -20,14 +20,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # [Lock Screens fork] This fork ships only the Xteink X4/X3 (ESP32-C3)
+          # image. Its lock-screen timed-sleep uses C3-only deep-sleep GPIO wake
+          # APIs, so the upstream sticky/x4pro/papermono (S3-class) targets don't
+          # compile here and were never shipped. Build just gh_release, matching
+          # the fork's pre-1.6.0 single-image release workflow.
           - pio_env: gh_release
             asset: firmware.bin
-          - pio_env: sticky-gh_release
-            asset: firmware-sticky.bin
-          - pio_env: x4pro-gh_release
-            asset: firmware-x4pro.bin
-          - pio_env: papermono-gh_release
-            asset: firmware-papermono.bin
     steps:
       - uses: actions/checkout@v6
         with:
