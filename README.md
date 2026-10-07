@@ -1,6 +1,6 @@
 # CrossPoint Reader — Lock Screens Fork
 
-> **This is a community fork of [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader)**, the excellent open-source e-reader firmware for Xteink X3/X4 devices. All credit for the core reader engine goes to the original CrossPoint team and contributors — this fork tracks their `develop` branch and adds one thing on top: **Lock Screens**, described below. Everything else works exactly like upstream CrossPoint.
+> **This is a community fork of [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader)**, the excellent open-source e-reader firmware for Xteink X3/X4 devices. All credit for the core reader engine goes to the original CrossPoint team and contributors — this fork follows their releases and adds one thing on top: **Lock Screens**, described below. Everything else works exactly like upstream CrossPoint.
 >
 > Not affiliated with the CrossPoint project, Xteink, or any device manufacturer.
 
@@ -22,7 +22,7 @@ Each dashboard has its own refresh interval (Settings → System → *GitHub/Wea
 
 Home → **Lock Screens** → pick one → enter your GitHub username / ZIP code / (optional) station label the first time. WiFi credentials are shared with the rest of CrossPoint (the same saved networks you already use for File Transfer, etc.).
 
-**Use one as your actual sleep screen** — set **Settings → Display → Sleep Screen → Lock Screen**, and pick which one under **Lock Screen Type**. Now whenever the device sleeps (auto-timeout or power button), instead of a static image it shows the live dashboard and keeps it refreshed on its interval. Press the power button to wake straight back to your book or home — the lock screen is purely an idle display and never traps you in it.
+**Use one as your actual sleep screen** — set **Settings → Display → Sleep Screen → Lock Screen**, and pick which one under **Lock Screen Type**. Now whenever the device sleeps (auto-timeout or power button), instead of a static image it shows the live dashboard and keeps it refreshed on its interval. Press the power button to wake straight back to your book or home — the lock screen is purely an idle display and never traps you in it. If the chosen dashboard isn't set up yet (no GitHub username or ZIP code), the device falls back to its normal sleep behavior until it is.
 
 ---
 
@@ -34,6 +34,8 @@ The easiest path — no computer tools required:
 2. Copy `firmware.bin` to the root of your device's SD card.
 3. Power the device off, then hold **Up** + **Power** while turning it back on to enter Recovery Mode.
 4. Select `firmware.bin` from the on-screen list and confirm.
+
+> **Coming from v1.6.0-lockscreens.1 or earlier?** Don't use **Check for updates** on those builds — they check upstream CrossPoint's releases and would replace this fork with stock CrossPoint, removing Lock Screens. Flash the new `firmware.bin` once with the steps above. From v1.6.0-lockscreens.2 on, **Check for updates** installs this fork's releases.
 
 Prefer USB? See [Install firmware](#install-firmware) below for the web installer and command-line (`esptool`) methods — same steps as upstream CrossPoint, just point them at this fork's `firmware.bin` instead.
 
@@ -63,7 +65,7 @@ Prefer USB? See [Install firmware](#install-firmware) below for the web installe
   - AP mode (hotspot) and STA mode (join existing Wi-Fi), both with QR helpers
   - Calibre wireless connect flow
   - OPDS browser with saved servers (up to 8), search, pagination, and direct download
-  - OTA update checks and installs from GitHub releases
+  - OTA update checks and installs from this fork's GitHub releases (v1.6.0-lockscreens.2 and later — see [Quick flash](#quick-flash))
 
 - **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
 
@@ -232,7 +234,7 @@ For more details on the internal file structures, see the [file formats document
 
 ## Relationship to upstream
 
-This fork tracks upstream CrossPoint's `develop` branch and merges upstream changes in periodically. Bugs and features
+This fork follows upstream CrossPoint's releases, merging each one in periodically. Bugs and features
 unrelated to Lock Screens should be reported/requested upstream at
 [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) — this fork exists only to
 carry the Lock Screens feature on top. Issues specific to Lock Screens (GitHub/Weather/Tempest dashboards) are welcome
