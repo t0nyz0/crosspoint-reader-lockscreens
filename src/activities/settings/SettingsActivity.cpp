@@ -312,7 +312,7 @@ void SettingsActivity::toggleCurrentSetting() {
     }
     setting.valueSetter((cur + 1) % totalValues);
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    const int8_t currentValue = SETTINGS.*(setting.valuePtr);
+    const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
       SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
     } else {
@@ -458,6 +458,14 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
       if (SETTINGS.sleepTimeoutMinutes >= CrossPointSettings::SLEEP_TIMEOUT_NEVER_MINUTES) {
         return tr(STR_SLEEP_NEVER);
       }
+      char valueBuffer[32];
+      snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+               static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
+      return valueBuffer;
+    }
+    // [Lock Screens fork] Dashboard refresh intervals are minutes, like the sleep timer.
+    if (setting.nameId == StrId::STR_GITHUB_REFRESH_INTERVAL || setting.nameId == StrId::STR_WEATHER_REFRESH_INTERVAL ||
+        setting.nameId == StrId::STR_TEMPEST_REFRESH_INTERVAL) {
       char valueBuffer[32];
       snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
                static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
