@@ -8,7 +8,9 @@ name: Compile Release
 on:
   push:
     tags:
-      - '*'
+      # [Lock Screens fork] Only this fork's release tags (v<base>-lockscreens.<N>),
+      # so pushing upstream's tags to the fork never starts a release build.
+      - 'v*-lockscreens.*'
 
 permissions:
   contents: read
@@ -35,6 +37,19 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+
+      # [Lock Screens fork] The in-device updater orders fork releases by the
+      # "-lockscreens.N" in both the release tag and the firmware's own version
+      # ([crosspoint] version). If they disagree, devices are offered the same
+      # release forever (or never), so refuse to build a mismatched tag.
+      - name: Check tag matches firmware version
+        run: |
+          VERSION=$(python3 -c "import configparser; c = configparser.ConfigParser(); c.read('platformio.ini', encoding='utf-8'); print(c.get('crosspoint', 'version'))")
+          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match platformio.ini version v${VERSION}"
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches firmware version ${VERSION}"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
