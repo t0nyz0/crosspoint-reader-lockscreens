@@ -371,6 +371,13 @@ void enterDashboardPowerOff() {
 // the normal enterDeepSleep().
 bool enterLockScreenSleep() {
   if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LOCK_SCREEN) return false;
+  // A dashboard that isn't set up yet (no GitHub username / weather ZIP) exits
+  // its unattended entry straight back to Home, so handing off would never reach
+  // deep sleep and the battery would drain. Use the default sleep screen instead.
+  if (!activityManager.lockScreenDashboardConfigured()) {
+    LOG_INF("SLP", "Lock screen dashboard not set up; using the default sleep screen");
+    return false;
+  }
   // Restore full CPU frequency before handing off. Auto-sleep fires after the
   // idle loop has already dropped the CPU to LOW_POWER_FREQ (10 MHz), and the
   // dashboard's very first act is to bring up WiFi (WiFi.mode(WIFI_STA)). The

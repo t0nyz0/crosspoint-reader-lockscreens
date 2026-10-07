@@ -102,6 +102,10 @@ class ActivityManager {
   // Launch the SETTINGS.sleepLockScreenType dashboard in unattended
   // (autoRefresh) mode, for the LOCK_SCREEN sleep-screen behavior.
   void goToLockScreenDashboard();
+  // Whether that dashboard has what it needs to run unattended (a GitHub
+  // username / weather ZIP; Tempest needs no setup). Without it the dashboard
+  // exits straight back to Home, so the device would never reach deep sleep.
+  bool lockScreenDashboardConfigured() const;
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

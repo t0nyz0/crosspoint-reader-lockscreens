@@ -299,6 +299,18 @@ void ActivityManager::goToLockScreenDashboard() {
   }
 }
 
+bool ActivityManager::lockScreenDashboardConfigured() const {
+  // Mirrors goToLockScreenDashboard()'s dispatch, including its GitHub default.
+  switch (SETTINGS.sleepLockScreenType) {
+    case CrossPointSettings::SLEEP_LOCK_WEATHER:
+      return SETTINGS.weatherZip[0] != '\0';
+    case CrossPointSettings::SLEEP_LOCK_TEMPEST:
+      return true;
+    default:
+      return SETTINGS.githubUsername[0] != '\0';
+  }
+}
+
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
   if (path.empty()) {
     goToFileBrowser("/");
